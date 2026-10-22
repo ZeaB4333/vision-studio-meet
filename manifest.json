@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Vision Studio — Google Meet Virtual Cam",
+  "version": "1.1.1",
+  "minimum_chrome_version": "111",
+  "description": "Dessin aérien, écriture Paint et formes physiques MediaPipe directement dans la caméra Google Meet.",
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ],
+  "sandbox": {
+    "pages": ["sandbox.html"]
+  },
+  "content_security_policy": {
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src https://cdn.jsdelivr.net data: blob:; worker-src 'self' blob:;"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["sandbox.html"],
+      "matches": ["https://meet.google.com/*"]
+    }
+  ]
+}

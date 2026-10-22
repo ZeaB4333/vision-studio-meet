@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <!-- Version épinglée : un "latest" qui change pourrait casser l'extension du jour au lendemain -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<script>
+  // Reçoit UNE miniature 384x216 à la fois (ping-pong), la traite avec le modèle léger
+  // (modelComplexity: 0) et renvoie les points des mains. Aucune file d'attente possible.
+  const MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/';
+  const SIZE_W = 384;
+  const SIZE_H = 216;
+
+  const workCanvas = document.createElement('canvas');
+  workCanvas.width = SIZE_W;
+  workCanvas.height = SIZE_H;
+  const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+
+  const post = (msg) => window.parent.postMessage(msg, '*');
+
+  let mpHands = null;
+  let busy = false;
+  let busySince = 0;
+
+  function onResults(results) {
+    busy = false;
+    post({
+      type: 'VS_HANDS_RESULTS',
+      multiHandLandmarks: results.multiHandLandmarks || [],
+      multiHandedness: results.multiHandedness || []
+    });
+  }
+
+  async function initHands() {
+    let tries = 0;
+    while (typeof Hands === 'undefined') {
+      if (++tries > 100) { // ~20 s
+        post({ type: 'VS_SANDBOX_ERROR', message: 'MediaPipe introuvable (CDN bloqué ou hors ligne ?)' });
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    try {
+      mpHands = new Hands({ locateFile: (file) => MP_BASE + file });
+      mpHands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 0, // modèle Lite temps réel
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      mpHands.onResults(onResults);
+      // Précharge le modèle MAINTENANT (et non à la 1re image) : plus d'attente au démarrage de la caméra
+      if (typeof mpHands.initialize === 'function') await mpHands.initialize();
+      post({ type: 'VS_SANDBOX_READY' });
+    } catch (err) {
+      mpHands = null;
+      post({ type: 'VS_SANDBOX_ERROR', message: String((err && err.message) || err) });
+    }
+  }
+
+  window.addEventListener('message', async (e) => {
+    if (e.source !== window.parent || !e.data || e.data.type !== 'VS_PROCESS_FRAME') return;
+    const bitmap = e.data.bitmap;
+    const now = performance.now();
+    if (busy && now - busySince > 1500) busy = false; // filet de sécurité : jamais bloqué à vie
+
+    if (!mpHands || busy) {
+      if (bitmap) bitmap.close();
+      post({ type: 'VS_HANDS_BUSY' });
+      return;
+    }
+
+    busy = true;
+    busySince = now;
+    try {
+      workCtx.drawImage(bitmap, 0, 0, SIZE_W, SIZE_H);
+      bitmap.close();
+      await mpHands.send({ image: workCanvas });
+    } catch (err) {
+      try { bitmap.close(); } catch (_) {}
+      busy = false;
+      post({ type: 'VS_HANDS_BUSY' });
+    }
+  });
+
+  initHands();
+</script>
+</body>
+</html>
