@@ -38,3 +38,46 @@ vision-studio-meet/
 ├── inject.js           # Interception de getUserMedia / enumerateDevices (Caméra Virtuelle Meet)
 ├── content.js          # Moteur graphique Canvas, physique 2D, AR, garde-clavier & UI flottante
 ├── sandbox.html        # Capsule isolée exécutant MediaPipe Hands en temps réel
+
+
+
+🛠️ Installation (Mode Développeur Chrome / Brave / Edge)
+
+Téléchargez ou clonez ce dépôt sur votre ordinateur.
+
+Ouvrez votre navigateur et accédez à chrome://extensions/.
+
+Activez le Mode développeur (bouton en haut à droite).
+
+Cliquez sur Charger l'extension non empaquetée (Load unpacked) en haut à gauche.
+
+Sélectionnez le dossier du projet (vision-studio-meet).
+
+Rejoignez une réunion sur Google Meet : cliquez sur la bulle flottante ✦ en bas à droite, puis sur [📷 START CAM].
+
+
+Action,Geste / Commande
+
+Écrire / Dessiner (Mode Paint),Index droit pointé + Maintenir Espace (ou Fermer le poing gauche)
+
+Déplacer une fenêtre AR / forme,Mode 01·MANIPULER AR + Pincer à 1 main (ou Espace)
+
+Agrandir / Rétrécir (Zoom AR),Mode 01·MANIPULER AR + Pincer avec les 2 mains et écarter (ou molette souris)
+
+Coller une capture d'écran en AR,Ctrl + V directement pendant la réunion
+
+Supprimer un objet / Fermer AR,Glisser l'objet jusqu'au bord de l'écran (zone rouge) ou bouton ↩ (Undo)
+
+Réduire l'interface en bulle ✦,Cliquer n'importe où en dehors de la fenêtre Vision Studio
+
+
+
+💻 Technologies Utilisées
+
+JavaScript (ES6+) & HTML5 Canvas API
+
+MediaPipe Hands (@mediapipe/hands) — Computer Vision & Hand Landmark Tracking
+
+WebRTC / MediaStream API (captureStream, getUserMedia, getDisplayMedia)
+
+Chrome Extension API (Manifest V3, Isolated & Main Worlds, CSP Sandboxing)
