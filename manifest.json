@@ -1,9 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "Vision Studio — Google Meet Virtual Cam",
+  "name": "Vision Studio for Google Meet™",
   "version": "1.1.1",
   "minimum_chrome_version": "111",
-  "description": "Dessin aérien, écriture Paint et formes physiques MediaPipe directement dans la caméra Google Meet.",
+  "description": "Caméra virtuelle AR pour Google Meet™ : dessin aérien aux doigts, pointeur laser, notes et fenêtres interactives en local.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "action": {
+    "default_title": "Vision Studio for Google Meet™",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],
@@ -18,15 +37,16 @@
       "world": "ISOLATED"
     }
   ],
-  "sandbox": {
-    "pages": ["sandbox.html"]
-  },
   "content_security_policy": {
-    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src https://cdn.jsdelivr.net data: blob:; worker-src 'self' blob:;"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' data: blob:;"
   },
   "web_accessible_resources": [
     {
-      "resources": ["sandbox.html"],
+      "resources": [
+        "sandbox.html",
+        "sandbox.js",
+        "vendor/*"
+      ],
       "matches": ["https://meet.google.com/*"]
     }
   ]

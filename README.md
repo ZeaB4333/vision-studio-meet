@@ -1,83 +1,73 @@
-# ✨ Vision Studio — AR Hand Tracking & Virtual Cam for Google Meet
+✨ Vision Studio for Google Meet™
 
-**Vision Studio** est une application web interactive et une extension Chrome (Manifest V3) propulsée par **MediaPipe Hands**. Elle transforme votre webcam en un studio de **Réalité Augmentée (AR)** et de dessin aérien directement intégré dans **Google Meet**, permettant d'écrire dans les airs, de manipuler des formes géométriques avec la gravité et de projeter des fenêtres ou tableaux de bord interactifs avec vos doigts.
+Vision Studio for Google Meet™ est une extension Chrome (Manifest V3) de réalité augmentée (AR) et d'annotation gestuelle propulsée localement par MediaPipe Tasks Vision (HandLandmarker). Elle remplace ou enrichit votre webcam dans Google Meet™ grâce à une caméra virtuelle HTML5 Canvas (captureStream), vous permettant d'écrire dans les airs, d'utiliser un pointeur laser éphémère et de projeter des fenêtres ou notes interactives pilotées avec vos doigts.
 
----
+🚀 FONCTIONNALITÉS PRINCIPALES
+======================================================================
 
-## 🚀 Fonctionnalités Principales
+✍️ 1. Gestes Unifiés Automatiques (Dessin, Manipulation 1 main & Zoom 2 mains)
+- Écriture aérienne fluide : Le curseur suit la pointe de l'index droit avec un lissage par courbes de Bézier (quadraticCurveTo) et une simplification géométrique Ramer-Douglas-Peucker.
+- Double Embrayage d'écriture (Dual-Clutch) :
+  • Geste Main Gauche : Fermez le poing gauche pour poser le stylo dans les airs, ouvrez la main pour lever le stylo.
+  • Clavier (en option) : Activez le bouton [✍️ Mode dessin: ON] et maintenez la Barre Espace pour dessiner. Lorsque Mode dessin est sur OFF (par défaut), la barre Espace est intégralement laissée à Google Meet™ (Push-to-Talk fonctionnel).
+- Manipulation automatique au pincement :
+  • Pincer à 1 main (droite) : Saisissez et déplacez n'importe quelle forme ou fenêtre AR, ou pincez son bouton [✕] pour la fermer.
+  • Pincer à 2 mains (gauche + droite) : Écartez ou rapprochez vos deux mains pour agrandir, rétrécir ou pivoter un objet.
+- Pointeur Laser (☄️ Laser) & Gomme (🧽 Gomme) : Tracez des annotations lumineuses qui s'effacent automatiquement après 2 secondes, ou gommez vos traits du bout du doigt sans affecter vos fenêtres AR.
 
-### ✍️ 1. Air Paint & Écriture Libre (`03 · PAINT`)
-* **Suivi de précision :** Le curseur suit la pointe de l'index droit en temps réel avec un lissage par courbes de Bézier (`quadraticCurveTo`) pour une écriture fluide dans les airs.
-* **Système à Double Embrayage (Dual-Clutch) :** Gardez la main droite détendue pour écrire et activez l'encre uniquement quand vous le souhaitez :
-  * **Main Gauche :** Fermez le poing gauche (ou pincez) pour poser le stylo, ouvrez la main pour lever le stylo.
-  * **Clavier :** Maintenez la **Barre Espace** enfoncée pour écrire (avec garde-clavier intelligent qui empêche Google Meet de couper votre micro tout en laissant le chat fonctionnel).
-* **Gomme intelligente (`🧽 GOMME`) :** Effacez vos traits et formes d'un simple passage du doigt sans supprimer vos fenêtres AR.
+🖥️ 2. Réalité Augmentée Interactive (Fenêtre AR, Image & Note Texte AR)
+- Capture de fenêtres en direct (🖥️ Fenêtre AR) : Projetez jusqu'à 3 écrans ou applications (Excel, VS Code, navigateur) sous forme de panneaux flottants dans votre vidéo via getDisplayMedia (cadencé à 15 images/s max pour préserver le CPU).
+- Import d'images & Copier-Coller (🖼️ Image / Ctrl + V) : Collez ou importez instantanément un graphique ou une capture d'écran dans votre flux vidéo.
+- Cartes de notes (Note Texte AR) : Générez des cartes de texte lisibles en direct et ajustez leur transparence (Opacité).
+- Ancrage des annotations : Tout trait ou forme dessiné par-dessus une fenêtre AR s'y attache automatiquement et suit ses déplacements et son redimensionnement.
 
-### 🖥️ 2. Réalité Augmentée Interactive (`FENÊTRE AR` & `IMAGE AR`)
-* **Capture de fenêtres en direct (`🖥️ FENÊTRE AR`) :** Projetez n'importe quel logiciel ouvert sur votre PC (Excel, PowerBI, VS Code, navigateur) sous forme d'écran holographique flottant dans votre webcam via `getDisplayMedia`.
-* **Import d'images & Copier-Coller (`🖼️ IMAGE AR` / `Ctrl + V`) :** Collez instantanément une capture d'écran ou un graphique dans votre flux vidéo.
-* **Manipulation & Zoom à 2 mains (`Pinch Stretch`) :** Déplacez vos fenêtres AR à une main et écartez vos deux mains pour zoomer en direct sur vos chiffres (avec maintien automatique de l'horizontalité).
-* **Annotation AR :** Dessinez et entourez des éléments directement par-dessus vos fenêtres flottantes.
+🎥 3. Double Rendu (Aperçu Miroir Privé vs Flux Sortant Lisible)
+- Aperçu local naturel : Dans la fenêtre Vision Studio (ou dans le mini-aperçu de 224×126 px affiché à côté de la bulle flottante ✦), votre retour vidéo est affiché en miroir avec votre curseur de visée et vos menus aériens.
+- Flux sortant propre et non inversé pour les participants :
+  • Le flux envoyé à Google Meet™ contient la vidéo non inversée.
+  • Les dessins et fenêtres AR sont positionnés aux coordonnées correspondantes (x' = largeur - x) sans inverser leur géométrie, afin que tout texte ou tableau reste parfaitement lisible à l'endroit pour vos interlocuteurs.
+  • Votre curseur de visée et l'interface ne sont jamais dessinés dans le flux sortant (sauf si vous activez volontairement [👁️ HUD Meet: ON]).
+- Passthrough natif (🟢 Ext: ON / OFF) : Basculez l'interrupteur sur OFF (depuis le ruban ou le popup de l'extension) pour désactiver la caméra virtuelle et laisser Google Meet™ utiliser directement votre caméra matérielle.
 
-### 📐 3. Formes Géométriques & Moteur Physique 2D (`01 · FIXE` & `02 · GRAVITÉ`)
-* **Menu Aérien & Smart Shape :** Générez des formes (`CIRCLE`, `RECT`, `TRIANGLE`, `STAR`, `HEXAGON`, `LINE`) depuis le menu virtuel ou activez la reconnaissance automatique des tracés à main levée.
-* **Physique & Collisions :** Activez la gravité pour faire tomber les formes, les faire rebondir entre elles et interagir physiquement avec vos mains.
+⚡ 4. Exécution 100 % Locale, Cache Statique & Maintien en Arrière-plan
+- Confidentialité totale & Zéro CDN : Le moteur @mediapipe/tasks-vision (WebAssembly + modèle hand_landmarker.task) est embarqué dans le dossier vendor/. Aucune image, vidéo ou donnée personnelle ne quitte votre navigateur.
+- Architecture Ping-Pong sans file d'attente : Une seule miniature 384×216 est envoyée à la fois au moteur d'inférence (GPU avec repli automatique CPU), évitant toute accumulation de retard.
+- Optimisation & Mode Économie (🍃 Éco) : Mise en cache hors-écran des formes statiques, maintien du flux vidéo à 30 FPS par Web Worker lorsque l'onglet Meet passe en arrière-plan (document.hidden), et mode économie réduisant la charge CPU/GPU sur les ordinateurs portables.
 
-### 🎥 4. Caméra Virtuelle Google Meet & Double Rendu (HUD Privé)
-* **Injection WebRTC transparente :** Remplace le flux de la caméra par un flux composite (`captureStream(30)`) sans logiciel tiers (pas besoin d'OBS).
-* **Double Rendu Intelligent (`👁️ HUD: OFF/ON`) :** Vous seul voyez vos menus aériens et vos repères de visée dans l'interface rétractable (bulle flottante `✦`), tandis que les participants de la réunion voient uniquement votre vidéo propre, vos dessins et vos fenêtres AR.
-* **Architecture Ping-Pong Zéro Latence :** Exécute MediaPipe Hands dans une capsule `sandbox.html` isolée sur des miniatures `384x216` avec le modèle Lite (`modelComplexity: 0`) pour garantir 0 ms de file d'attente.
+📁 STRUCTURE DU PROJET
+======================================================================
 
----
-
-## 📁 Structure du Projet
-
-```text
 vision-studio-meet/
-├── manifest.json       # Configuration de l'extension Chrome (Manifest V3 & CSP Sandbox)
-├── inject.js           # Interception de getUserMedia / enumerateDevices (Caméra Virtuelle Meet)
-├── content.js          # Moteur graphique Canvas, physique 2D, AR, garde-clavier & UI flottante
-├── sandbox.html        # Capsule isolée exécutant MediaPipe Hands en temps réel
+├── manifest.json       Configuration Chrome MV3, permissions minimales & CSP locale
+├── inject.js           Monde MAIN : interception getUserMedia / enumerateDevices & passthrough
+├── content.js          Monde ISOLATED : UI ruban, garde-clavier Espace, double rendu Canvas & AR
+├── sandbox.html        Page d'inférence interne hébergeant le module MediaPipe local
+├── sandbox.js          Moteur @mediapipe/tasks-vision (HandLandmarker GPU/CPU) en ping-pong
+├── popup.html          Popup de contrôle rapide (Interrupteur ON/OFF, statut, version & aide)
+├── popup.js            Logique du popup synchronisée via chrome.storage.local
+├── icons/              Icônes de l'extension (16, 32, 48, 128 px)
+└── vendor/             Binaires locaux MediaPipe (vision_bundle.mjs, hand_landmarker.task, wasm/)
 
+🛠️ INSTALLATION (MODE DÉVELOPPEUR CHROME / EDGE / BRAVE ≥ 111)
+======================================================================
 
+1. Clonez ou téléchargez ce dépôt sur votre ordinateur.
+2. Ouvrez votre navigateur Chromium (version 111 ou supérieure) et accédez à chrome://extensions/.
+3. Activez le Mode développeur (en haut à droite).
+4. Cliquez sur Charger l'extension non empaquetée (Load unpacked) et sélectionnez le dossier vision-studio-meet.
+5. Ouvrez https://meet.google.com/ : votre caméra démarre automatiquement. Cliquez sur la bulle flottante ✦ pour accéder au ruban d'outils.
 
-🛠️ Installation (Mode Développeur Chrome / Brave / Edge)
+🎮 RÉSUMÉ DES COMMANDES & GESTES
+======================================================================
 
-Téléchargez ou clonez ce dépôt sur votre ordinateur.
+- Dessiner / Écrire dans les airs : Fermer le poing gauche (ou activer [✍️ Mode dessin: ON] + maintenir Espace) et pointer l'index droit.
+- Déplacer une forme ou fenêtre AR : Pincer à 1 main (pouce + index de la main droite) sur l'objet.
+- Agrandir / Rétrécir (Zoom AR) : Pincer avec les 2 mains simultanément et écarter / rapprocher (ou molette souris).
+- Coller une image en AR : Ctrl + V directement sur la page ou bouton [🖼️ Image].
+- Fermer une fenêtre AR / Supprimer : Pincer ou cliquer sur le bouton [✕] de la fenêtre AR, glisser une forme au bord, ou cliquer sur ↩.
+- Utiliser le Push-to-Talk de Meet : Laisser [✍️ Mode dessin: OFF] (réglage par défaut) et maintenir Espace.
+- Revenir à la webcam normale : Basculer [🟢 Ext: ON] sur OFF (dans le ruban ou dans le popup de l'extension).
 
-Ouvrez votre navigateur et accédez à chrome://extensions/.
+📜 ATTRIBUTION
 
-Activez le Mode développeur (bouton en haut à droite).
-
-Cliquez sur Charger l'extension non empaquetée (Load unpacked) en haut à gauche.
-
-Sélectionnez le dossier du projet (vision-studio-meet).
-
-Rejoignez une réunion sur Google Meet : cliquez sur la bulle flottante ✦ en bas à droite, puis sur [📷 START CAM].
-
-
-Action,Geste / Commande
-
-Écrire / Dessiner (Mode Paint),Index droit pointé + Maintenir Espace (ou Fermer le poing gauche)
-
-Déplacer une fenêtre AR / forme,Mode 01·MANIPULER AR + Pincer à 1 main (ou Espace)
-
-Agrandir / Rétrécir (Zoom AR),Mode 01·MANIPULER AR + Pincer avec les 2 mains et écarter (ou molette souris)
-
-Coller une capture d'écran en AR,Ctrl + V directement pendant la réunion
-
-Supprimer un objet / Fermer AR,Glisser l'objet jusqu'au bord de l'écran (zone rouge) ou bouton ↩ (Undo)
-
-Réduire l'interface en bulle ✦,Cliquer n'importe où en dehors de la fenêtre Vision Studio
-
-
-
-💻 Technologies Utilisées
-
-JavaScript (ES6+) & HTML5 Canvas API
-
-MediaPipe Hands (@mediapipe/hands) — Computer Vision & Hand Landmark Tracking
-
-WebRTC / MediaStream API (captureStream, getUserMedia, getDisplayMedia)
-
-Chrome Extension API (Manifest V3, Isolated & Main Worlds, CSP Sandboxing)
+Google Meet est une marque de Google LLC. Cette extension est un projet indépendant et n'est ni affiliée à, ni approuvée par Google LLC.

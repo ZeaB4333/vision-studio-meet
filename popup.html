@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Vision Studio</title>
+  <style>
+    :root {
+      --bg: #08090c;
+      --panel: #11141d;
+      --border: rgba(255, 255, 255, 0.16);
+      --text: #e8ecf2;
+      --muted: rgba(255, 255, 255, 0.6);
+      --accent: #00f0ff;
+      --success: #39ff14;
+      --danger: #ff334b;
+      --font: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      width: 300px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 12px;
+      user-select: none;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 700;
+      font-size: 12px;
+      color: #fff;
+    }
+    .brand-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .version {
+      font-size: 10px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .label-title {
+      font-weight: 700;
+      font-size: 11px;
+      color: #fff;
+    }
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--danger);
+      flex-shrink: 0;
+    }
+    .status-dot.on {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    /* Interrupteur Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: #262b38;
+      border: 1px solid var(--border);
+      transition: 0.18s;
+      border-radius: 22px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: #fff;
+      transition: 0.18s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: rgba(0, 240, 255, 0.25);
+      border-color: var(--accent);
+    }
+    input:checked + .slider:before {
+      transform: translateX(18px);
+      background-color: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+    }
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+    .help-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      background: none;
+      border: none;
+      font-family: inherit;
+    }
+    .help-link:hover {
+      text-decoration: underline;
+    }
+    .help-box {
+      display: none;
+      margin-top: 10px;
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 9.8px;
+      line-height: 1.45;
+      color: var(--text);
+    }
+    .help-box.open {
+      display: block;
+    }
+    .help-box ul {
+      padding-left: 14px;
+      margin-top: 4px;
+    }
+    .help-box li {
+      margin-bottom: 3px;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>VISION STUDIO</span>
+    </div>
+    <span class="version" id="vsPopupVersion">v1.1.1</span>
+  </header>
+
+  <section class="card">
+    <div class="row">
+      <span class="label-title">Extension active</span>
+      <label class="switch" title="Activer ou désactiver la caméra virtuelle sur Google Meet">
+        <input type="checkbox" id="vsPopupToggle" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="status-line">
+      <span class="status-dot on" id="vsPopupStatusDot"></span>
+      <span id="vsPopupStatusText">Caméra virtuelle prête pour Meet</span>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <button type="button" class="help-link" id="vsPopupHelpBtn">❓ Aide & Gestes rapides</button>
+    <span style="color: var(--muted); font-size: 9.5px;">meet.google.com</span>
+  </footer>
+
+  <div class="help-box" id="vsPopupHelpBox">
+    <strong>Guide rapide sur Google Meet :</strong>
+    <ul>
+      <li><strong>Dessiner :</strong> Fermez le <em>poing gauche</em> (ou activez <em>Mode dessin</em> + maintenez <em>Espace</em>) et pointez l'index droit.</li>
+      <li><strong>Déplacer (1 main) :</strong> Pincez pouce + index de la main droite sur une forme ou fenêtre AR.</li>
+      <li><strong>Zoomer (2 mains) :</strong> Pincez avec les 2 mains simultanément et écartez-les.</li>
+      <li><strong>Vraie caméra :</strong> Basculez l'interrupteur ci-dessus sur OFF pour désactiver Vision Studio.</li>
+    </ul>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
