@@ -1,6 +1,8 @@
 # Vision Studio for Google Meet™
 
-**Vision Studio for Google Meet™** est une extension Chrome (Manifest V3) de réalité augmentée (AR) et d'annotation gestuelle propulsée 100 % localement par MediaPipe Tasks Vision (`HandLandmarker`). Elle enrichit votre webcam dans Google Meet™ grâce à une caméra virtuelle HTML5 Canvas (`captureStream`), vous permettant d'écrire dans les airs, d'utiliser un pointeur laser éphémère et de projeter des fenêtres ou notes interactives pilotées avec vos doigts.
+**Vision Studio for Google Meet™** est une extension Chrome / Edge / Brave (Manifest V3) de réalité augmentée (AR) et d'annotation gestuelle propulsée 100 % localement par MediaPipe Tasks Vision (`HandLandmarker`). Elle enrichit votre webcam dans Google Meet™ grâce à une caméra virtuelle HTML5 Canvas (`captureStream`), vous permettant d'écrire dans les airs, d'utiliser un pointeur laser éphémère et de projeter des fenêtres ou notes interactives pilotées avec vos doigts.
+
+> **[Télécharger la dernière version (v1.1.1 .zip)](https://github.com/ZeaB4333/vision-studio-meet/releases/latest)** · [Politique de confidentialité](https://github.com/ZeaB4333/vision-studio-meet/blob/main/PRIVACY.md) · **100 % local · Zéro OBS · Gratuit**
 
 ---
 
@@ -58,12 +60,12 @@ vision-studio-meet/
 
 ---
 
-## Installation (Mode développeur Chrome / Edge / Brave ≥ 111)
+## Installation (Chrome / Edge / Brave ≥ 111)
 
-1. Téléchargez ou clonez ce dossier sur votre ordinateur.
-2. Ouvrez `chrome://extensions/` dans votre navigateur Chromium (version 111 ou supérieure).
+1. Téléchargez `vision-studio-meet-v1.1.1.zip` depuis la page [Releases](https://github.com/ZeaB4333/vision-studio-meet/releases/latest) et décompressez-le.
+2. Ouvrez `chrome://extensions/` (ou `edge://extensions/`) dans votre navigateur Chromium (version 111 ou supérieure).
 3. Activez le **Mode développeur** (en haut à droite).
-4. Cliquez sur **Charger l'extension non empaquetée** et sélectionnez le dossier `vision-studio-meet`.
+4. Cliquez sur **Charger l'extension non empaquetée** et sélectionnez le dossier décompressé.
 5. Ouvrez `https://meet.google.com/` : votre caméra démarre automatiquement. Cliquez sur la bulle flottante pour ouvrir le panneau.
 
 ## Packaging pour le Chrome Web Store
