@@ -45,6 +45,7 @@
       "resources": [
         "sandbox.html",
         "sandbox.js",
+        "bg-timer.js",
         "vendor/*"
       ],
       "matches": ["https://meet.google.com/*"]

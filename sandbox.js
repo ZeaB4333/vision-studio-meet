@@ -1,7 +1,5 @@
 import { FilesetResolver, HandLandmarker } from './vendor/vision_bundle.mjs';
 
-// Reçoit UNE miniature 384x216 à la fois (ping-pong), l'analyse en local via
-// @mediapipe/tasks-vision (HandLandmarker GPU avec repli CPU) et renvoie VS_HANDS_RESULTS.
 const SIZE_W = 384;
 const SIZE_H = 216;
 
@@ -10,7 +8,26 @@ workCanvas.width = SIZE_W;
 workCanvas.height = SIZE_H;
 const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
 
-const post = (msg) => window.parent.postMessage(msg, '*');
+const MEET_ORIGIN = 'https://meet.google.com';
+const post = (msg) => window.parent.postMessage(msg, MEET_ORIGIN);
+
+// Minuteur Web Worker hébergé dans l'iframe d'extension (soumis à la CSP de l'extension et non à celle de Meet)
+let bgWorker = null;
+let bgWorkerReady = false;
+try {
+  bgWorker = new Worker('bg-timer.js');
+  bgWorker.onmessage = () => {
+    post({ type: 'VS_TICK' });
+  };
+  bgWorker.onerror = () => {
+    bgWorkerReady = false;
+  };
+  bgWorkerReady = true;
+  post({ type: 'VS_TIMER_READY', ready: true });
+} catch (err) {
+  bgWorkerReady = false;
+  post({ type: 'VS_TIMER_READY', ready: false });
+}
 
 let handLandmarker = null;
 let busy = false;
@@ -28,9 +45,9 @@ async function createLandmarkerWithFallback(vision) {
   const commonOptions = {
     runningMode: 'VIDEO',
     numHands: 2,
-    minHandDetectionConfidence: 0.3,
-    minHandPresenceConfidence: 0.3,
-    minTrackingConfidence: 0.3
+    minHandDetectionConfidence: 0.25,
+    minHandPresenceConfidence: 0.18,
+    minTrackingConfidence: 0.18
   };
 
   try {
@@ -62,12 +79,11 @@ async function initHands() {
     const { instance, delegate } = await createLandmarkerWithFallback(vision);
     handLandmarker = instance;
 
-    // Préchauffage du modèle sur une frame vide pour éviter tout gel à la 1re image caméra
     workCtx.fillStyle = '#000000';
     workCtx.fillRect(0, 0, SIZE_W, SIZE_H);
     handLandmarker.detectForVideo(workCanvas, nextMonotonicTimestamp());
 
-    post({ type: 'VS_SANDBOX_READY', delegate });
+    post({ type: 'VS_SANDBOX_READY', delegate, timerReady: bgWorkerReady });
   } catch (err) {
     handLandmarker = null;
     post({
@@ -78,12 +94,22 @@ async function initHands() {
 }
 
 window.addEventListener('message', (e) => {
-  if (e.source !== window.parent || !e.data || e.data.type !== 'VS_PROCESS_FRAME') return;
+  if (e.source !== window.parent || e.origin !== MEET_ORIGIN || !e.data) return;
+
+  if (e.data.type === 'VS_TIMER') {
+    if (bgWorker && bgWorkerReady) {
+      bgWorker.postMessage(e.data.cmd);
+    }
+    return;
+  }
+
+  if (e.data.type !== 'VS_PROCESS_FRAME') return;
+
   const bitmap = e.data.bitmap;
   const now = performance.now();
 
   if (busy && now - busySince > 1500) {
-    busy = false; // Filet de sécurité : jamais bloqué indéfiniment
+    busy = false;
   }
 
   if (!handLandmarker || busy) {
@@ -108,12 +134,10 @@ window.addEventListener('message', (e) => {
     const multiHandedness = rawHandedness.map((entry) => {
       const top = Array.isArray(entry) ? entry[0] : entry;
       const rawCat = (top && (top.categoryName || top.displayName || top.label)) || 'Right';
-      // Harmonisation de la latéralité avec le format legacy attendu par content.js :
-      // Dans HandLandmarker (tasks-vision), categoryName renvoie la latéralité anatomique ('Left' pour main gauche),
-      // alors que @mediapipe/hands legacy renvoyait l'inverse ('Right' pour main gauche sur flux non inversé).
       const compatLabel = rawCat === 'Left' ? 'Right' : (rawCat === 'Right' ? 'Left' : rawCat);
       return {
         label: compatLabel,
+        rawLabel: rawCat,
         score: (top && typeof top.score === 'number') ? top.score : 1
       };
     });

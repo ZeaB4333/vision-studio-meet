@@ -2,17 +2,30 @@
   // ==========================================================================
   // 0. GARDE-CLAVIER DÈS DOCUMENT_START (Protège Espace sur Meet sauf saisie texte)
   // ==========================================================================
-  const guard = { camActive: false, held: false, onDown: null, onUp: null };
+  const guard = { camActive: false, held: false, onDown: null, onUp: null, onShortcut: null };
   let pendingMeetCamRequest = false;
   let pendingRequestedDeviceId = '';
 
   const MAX_SHAPES = 300;
   const MAX_AR_OBJECTS = 3;
 
+  const DEFAULT_SHORTCUTS = {
+    drawMode: 'KeyD',
+    laser: 'KeyL',
+    eraser: 'KeyE',
+    hideAll: 'KeyH',
+    undo: 'KeyZ',
+    redo: 'KeyY'
+  };
+
   const DEFAULT_SETTINGS = {
     extEnabled: true,
     drawMode: false,
     ecoMode: false,
+    leftHanded: false,
+    lang: 'fr',
+    tutorialSeen: false,
+    shortcuts: DEFAULT_SHORTCUTS,
     mode: 'paint',
     color: '#00f0ff',
     strokeWidth: 3.5,
@@ -27,6 +40,7 @@
     showHudOnMeet: false,
     selectedDeviceId: '',
     pinchThreshold: 0.58,
+    showHint: false,
     windowBounds: null,
     bubblePos: null
   };
@@ -44,7 +58,6 @@
     document.documentElement.dataset.vsExtEnabled = initialExtEnabled ? 'true' : 'false';
   }
 
-  // Synchronisation dès document_start avec chrome.storage.local
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     chrome.storage.local.get({ extEnabled: initialExtEnabled }, (res) => {
       const enabled = res.extEnabled !== false;
@@ -88,17 +101,25 @@
   }
 
   window.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space' || e.ctrlKey || e.altKey || e.metaKey) return;
-    if (guard.held) { swallow(e); return; }
-    if (!guard.camActive) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
     const target = (e.composedPath && e.composedPath()[0]) || e.target;
     if (isTextEntry(target)) return;
-    swallow(e);
-    if (e.repeat) return;
-    guard.held = true;
-    const ae = document.activeElement;
-    if (ae && ae !== document.body && typeof ae.blur === 'function') ae.blur();
-    if (guard.onDown) guard.onDown();
+
+    if (e.code === 'Space') {
+      if (guard.held) { swallow(e); return; }
+      if (!guard.camActive) return;
+      swallow(e);
+      if (e.repeat) return;
+      guard.held = true;
+      const ae = document.activeElement;
+      if (ae && ae !== document.body && typeof ae.blur === 'function') ae.blur();
+      if (guard.onDown) guard.onDown();
+      return;
+    }
+
+    if (!e.repeat && guard.onShortcut) {
+      guard.onShortcut(e);
+    }
   }, true);
 
   window.addEventListener('keypress', (e) => {
@@ -120,7 +141,11 @@
           if (chrome.runtime && chrome.runtime.lastError) {
             resolve({ ...DEFAULT_SETTINGS, extEnabled: readInitialExtEnabledSync() });
           } else {
-            resolve({ ...DEFAULT_SETTINGS, ...items });
+            resolve({
+              ...DEFAULT_SETTINGS,
+              ...items,
+              shortcuts: { ...DEFAULT_SHORTCUTS, ...(items && items.shortcuts ? items.shortcuts : {}) }
+            });
           }
         });
       } else {
@@ -129,7 +154,6 @@
     });
   }
 
-  // Simplification géométrique Ramer-Douglas-Peucker (RDP)
   function perpendicularDistance(pt, lineStart, lineEnd) {
     const dx = lineEnd.x - lineStart.x;
     const dy = lineEnd.y - lineStart.y;
@@ -163,7 +187,252 @@
   }
 
   // ==========================================================================
-  // 1. INITIALISATION DE L'INTERFACE RUBAN (LECTURE STORAGE AVANT CONSTRUCTION UI)
+  // 1. DICTIONNAIRE BILINGUE (FR / EN) & ICÔNES SVG
+  // ==========================================================================
+  const I18N = {
+    fr: {
+      tabHome: 'Accueil',
+      tabInsert: 'Insertion & AR',
+      tabStyle: 'Dessin & Style',
+      tabSettings: 'Caméra & IA',
+      startCam: 'START CAM',
+      camOn: 'CAM ON',
+      stopCam: 'STOP CAM',
+      drawModeOn: 'Mode dessin: ON',
+      drawModeOff: 'Mode dessin: OFF',
+      laser: 'Laser',
+      laserStyle: 'Mode Laser (2s)',
+      eraser: 'Gomme',
+      arWin: 'Fenêtre AR',
+      arImg: 'Image',
+      arTextPlaceholder: 'Note Texte AR…',
+      shapesOn: 'Formes: ON',
+      shapesOff: 'Formes: OFF',
+      opacity: 'Opacité',
+      stroke: 'Trait',
+      mirror: 'Miroir',
+      flipAr: 'Flip AR',
+      smartShape: 'Smart Shape',
+      fill: 'Remplir',
+      bw: 'N&B',
+      clear: 'Clear',
+      camDefaultOption: 'Caméra PC / Tel',
+      camLabelPrefix: 'Caméra',
+      extOn: 'Ext: ON',
+      extOff: 'Ext: OFF',
+      hudMeetOn: 'HUD Meet: ON',
+      hudMeetOff: 'HUD Meet: OFF',
+      leftHandedOn: 'Gaucher: ON',
+      leftHandedOff: 'Gaucher: OFF',
+      ecoOn: 'Éco: ON',
+      ecoOff: 'Éco: OFF',
+      shortcutsBtn: 'Raccourcis',
+      hideAllOn: 'Masqué',
+      hideAllOff: 'Visible',
+      aiLoading: 'IA…',
+      aiReady: 'IA OK',
+      aiError: 'IA ERR',
+      clutchOff: 'OFF',
+      clutchSpace: 'ESP',
+      clutchFistL: 'POING G',
+      clutchFistR: 'POING D',
+      hint: 'GESTES AUTO : [POING] ou [ESPACE] = DESSINER · [PINCER 1 MAIN] = DÉPLACER · [PINCER 2 MAINS] = ZOOMER',
+      infoHintTitle: 'Afficher / Masquer l’aide gestuelle',
+      trashWarn: 'ZONE DE SUPPRESSION — RELÂCHER POUR SUPPRIMER',
+      localPreview: 'APERÇU LOCAL',
+      tutoTitle: 'Guide Rapide — Vision Studio',
+      tutoCard1Title: 'Dessiner',
+      tutoStep1: 'Fermez le poing auxiliaire (ou Mode dessin + Espace) et bougez votre index dominant.',
+      tutoCard2Title: 'Déplacer (1 main)',
+      tutoStep2: 'Pincez pouce + index sur un dessin ou une fenêtre AR. Glissez au bord rouge pour supprimer.',
+      tutoCard3Title: 'Zoomer (2 mains)',
+      tutoStep3: 'Pincez avec les 2 mains simultanément et écartez-les pour agrandir ou pivoter.',
+      tutoClose: 'Compris !',
+      toastMpTimeoutTitle: 'Chargement IA trop long',
+      toastMpTimeoutMsg: 'Le moteur MediaPipe ne répond pas après 10 s. Cliquez sur Réessayer pour le relancer.',
+      toastClearTitle: 'Tableau effacé',
+      toastClearMsg: 'Tous les éléments ont été retirés.',
+      undoAction: 'Annuler',
+      toastAudioErrTitle: 'Microphone indisponible',
+      toastAudioErrMsg: 'Impossible d’accéder au microphone dans Meet. Vérifiez vos autorisations audio.',
+      scTitle: 'Raccourcis clavier (cliquer pour modifier)',
+      scHint: 'Actifs quand la fenêtre Vision Studio est ouverte (hors saisie texte).',
+      scDrawMode: 'Mode dessin',
+      scLaser: 'Laser (2s)',
+      scEraser: 'Gomme',
+      scHideAll: 'Tout masquer',
+      scUndo: 'Annuler (Undo)',
+      scRedo: 'Rétablir (Redo)',
+      retryBtn: 'Réessayer',
+      toastArCapTitle: 'Plafond AR atteint (3 max)',
+      toastArCapMsg: 'Vous avez déjà 3 objets AR actifs. Fermez-en un avec [✕] ou glissez-le au bord rouge.',
+      toastCaptureCancelTitle: 'Capture d’écran annulée',
+      toastCaptureCancelMsg: 'Aucune fenêtre ou écran n’a été sélectionné pour la projection AR.',
+      toastMpErrTitle: 'MediaPipe en échec',
+      toastMpErrSuffix: 'Vérifiez le dossier vendor/ ou réessayez.',
+      toastBgTabTitle: 'Onglet Meet en arrière-plan',
+      toastBgTabActiveMsg: 'Minuteur d’arrière-plan actif pour maintenir votre flux vidéo.',
+      toastBgTabWarnMsg: 'Gardez l’onglet Meet visible pour éviter le gel de la caméra.',
+      toastCamFallbackTitle: 'Caméra mémorisée introuvable',
+      toastCamFallbackMsg: 'Caméra mémorisée introuvable, caméra par défaut utilisée.',
+      toastCamPermTitle: 'Autorisez la caméra',
+      toastCamPermMsg: 'Accès refusé. Cliquez sur l’icône de cadenas à gauche de l’URL meet.google.com → Autoriser la caméra, puis cliquez sur Réessayer.',
+      toastCamErrTitle: 'Erreur matérielle caméra',
+      toastCamErrPrefix: 'Impossible de démarrer la caméra',
+      toastStopCamTitle: 'Caméra virtuelle arrêtée',
+      toastExtOffTitle: 'Extension désactivée (Passthrough)',
+      toastExtOffMsg: 'Retour à la vraie caméra. Si l’image reste figée, coupez puis rallumez la caméra dans Meet.',
+      toastExtOnTitle: 'Extension activée',
+      toastExtOnMsg: 'Caméra virtuelle active. Si les dessins n’apparaissent pas chez les participants, coupez puis rallumez la caméra dans Meet.'
+    },
+    en: {
+      tabHome: 'Home',
+      tabInsert: 'Insert & AR',
+      tabStyle: 'Draw & Style',
+      tabSettings: 'Camera & AI',
+      startCam: 'START CAM',
+      camOn: 'CAM ON',
+      stopCam: 'STOP CAM',
+      drawModeOn: 'Draw Mode: ON',
+      drawModeOff: 'Draw Mode: OFF',
+      laser: 'Laser',
+      laserStyle: 'Laser Mode (2s)',
+      eraser: 'Eraser',
+      arWin: 'AR Window',
+      arImg: 'Image',
+      arTextPlaceholder: 'AR Text Note…',
+      shapesOn: 'Shapes: ON',
+      shapesOff: 'Shapes: OFF',
+      opacity: 'Opacity',
+      stroke: 'Stroke',
+      mirror: 'Mirror',
+      flipAr: 'Flip AR',
+      smartShape: 'Smart Shape',
+      fill: 'Fill',
+      bw: 'B&W',
+      clear: 'Clear',
+      camDefaultOption: 'PC / Phone Cam',
+      camLabelPrefix: 'Camera',
+      extOn: 'Ext: ON',
+      extOff: 'Ext: OFF',
+      hudMeetOn: 'HUD Meet: ON',
+      hudMeetOff: 'HUD Meet: OFF',
+      leftHandedOn: 'Left-Hand: ON',
+      leftHandedOff: 'Left-Hand: OFF',
+      ecoOn: 'Eco: ON',
+      ecoOff: 'Eco: OFF',
+      shortcutsBtn: 'Shortcuts',
+      hideAllOn: 'Hidden',
+      hideAllOff: 'Visible',
+      aiLoading: 'AI…',
+      aiReady: 'AI OK',
+      aiError: 'AI ERR',
+      clutchOff: 'OFF',
+      clutchSpace: 'SPACE',
+      clutchFistL: 'FIST L',
+      clutchFistR: 'FIST R',
+      hint: 'AUTO GESTURES: [FIST] or [SPACE] = DRAW · [1-HAND PINCH] = MOVE · [2-HAND PINCH] = ZOOM',
+      infoHintTitle: 'Show / Hide gesture hint',
+      trashWarn: 'TRASH ZONE — RELEASE TO DELETE',
+      localPreview: 'LOCAL PREVIEW',
+      tutoTitle: 'Quick Guide — Vision Studio',
+      tutoCard1Title: 'Draw',
+      tutoStep1: 'Close your auxiliary fist (or Draw Mode + Spacebar) and move your dominant index finger.',
+      tutoCard2Title: 'Move (1 hand)',
+      tutoStep2: 'Pinch thumb + index on any stroke or AR window. Drag to the red edge to delete.',
+      tutoCard3Title: 'Zoom (2 hands)',
+      tutoStep3: 'Pinch with both hands simultaneously and spread them to resize or rotate.',
+      tutoClose: 'Got it!',
+      toastMpTimeoutTitle: 'AI Engine Timeout',
+      toastMpTimeoutMsg: 'MediaPipe did not respond after 10s. Click Retry to reload it.',
+      toastClearTitle: 'Canvas Cleared',
+      toastClearMsg: 'All drawings and AR items were removed.',
+      undoAction: 'Undo',
+      toastAudioErrTitle: 'Microphone Unavailable',
+      toastAudioErrMsg: 'Could not access the microphone for Meet. Check your browser audio permissions.',
+      scTitle: 'Keyboard Shortcuts (click to rebind)',
+      scHint: 'Active while the Vision Studio panel is open (outside text inputs).',
+      scDrawMode: 'Draw Mode',
+      scLaser: 'Laser (2s)',
+      scEraser: 'Eraser',
+      scHideAll: 'Hide All',
+      scUndo: 'Undo',
+      scRedo: 'Redo',
+      retryBtn: 'Retry',
+      toastArCapTitle: 'AR Limit Reached (3 max)',
+      toastArCapMsg: 'You already have 3 active AR objects. Close one with [✕] or drag it to the red edge.',
+      toastCaptureCancelTitle: 'Screen Capture Cancelled',
+      toastCaptureCancelMsg: 'No window or screen was selected for AR projection.',
+      toastMpErrTitle: 'MediaPipe Failed',
+      toastMpErrSuffix: 'Check the vendor/ folder or retry.',
+      toastBgTabTitle: 'Meet Tab in Background',
+      toastBgTabActiveMsg: 'Background timer active to keep your video stream running.',
+      toastBgTabWarnMsg: 'Keep the Meet tab visible to prevent the camera from freezing.',
+      toastCamFallbackTitle: 'Saved Camera Not Found',
+      toastCamFallbackMsg: 'Saved camera unavailable, falling back to default camera.',
+      toastCamPermTitle: 'Allow Camera Access',
+      toastCamPermMsg: 'Permission denied. Click the lock icon next to meet.google.com → Allow camera, then click Retry.',
+      toastCamErrTitle: 'Camera Hardware Error',
+      toastCamErrPrefix: 'Unable to start camera',
+      toastStopCamTitle: 'Virtual Camera Stopped',
+      toastExtOffTitle: 'Extension Disabled (Passthrough)',
+      toastExtOffMsg: 'Switched back to your hardware webcam. If video stays frozen, toggle the camera off and on in Meet.',
+      toastExtOnTitle: 'Extension Enabled',
+      toastExtOnMsg: 'Virtual camera active. If drawings do not appear for participants, toggle the camera off and on in Meet.'
+    }
+  };
+
+  const ICONS = {
+    home: '<path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/>',
+    layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 12 12 17 22 12"/><polyline points="2 17 12 22 22 17"/>',
+    palette: '<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.5-.7 1.5-1.5 0-.4-.1-.7-.4-1-.3-.3-.4-.7-.4-1.1 0-.8.7-1.5 1.5-1.5H16c3.3 0 6-2.7 6-6 0-5-4.5-9-10-9z"/>',
+    sliders: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+    video: '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>',
+    stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+    pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    laser: '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',
+    eraser: '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+    monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+    plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    shapes: '<circle cx="8" cy="15" r="4"/><polygon points="15 4 21 14 9 14"/>',
+    flip: '<polyline points="17 2 21 6 17 10"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 22 3 18 7 14"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
+    sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/>',
+    square: '<rect x="4" y="4" width="16" height="16" rx="2"/>',
+    hand: '<path d="M18 11V6a2 2 0 0 0-4 0v4"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M6 14v-1a2 2 0 0 0-4 0v3a8 8 0 0 0 8 8h2a8 8 0 0 0 8-8v-5a2 2 0 0 0-4 0"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-6.5 0-10-7-10-7a18.5 18.5 0 0 1 5.1-5.9"/><path d="M9.9 4.2A10.5 10.5 0 0 1 12 5c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.2 3.2"/><line x1="2" y1="2" x2="22" y2="22"/>',
+    contrast: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor"/>',
+    leaf: '<path d="M11 20A7 7 0 0 1 4 13C4 7 11 3 20 3c0 9-4 17-9 17z"/><path d="M4 20l7-7"/>',
+    keyboard: '<rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6" y2="8"/><line x1="10" y1="8" x2="10" y2="8"/><line x1="14" y1="8" x2="14" y2="8"/><line x1="18" y1="8" x2="18" y2="8"/><line x1="7" y1="16" x2="17" y2="16"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    tv: '<rect x="2" y="4" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/>',
+    minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
+    undo: '<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>',
+    redo: '<polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+    power: '<path d="M18.4 6.6a9 9 0 1 1-12.8 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
+    close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
+  };
+
+  function iconSvg(name, size = 13) {
+    const body = ICONS[name] || '';
+    return `<svg class="vs-ico" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+  }
+
+  function setBtn(el, iconKey, label = '') {
+    if (!el) return;
+    el.innerHTML = iconKey ? iconSvg(iconKey) : '';
+    if (label) {
+      const sp = document.createElement('span');
+      sp.textContent = label;
+      el.appendChild(sp);
+    }
+  }
+
+  // ==========================================================================
+  // 2. INITIALISATION DE L'INTERFACE RUBAN (LECTURE STORAGE AVANT CONSTRUCTION UI)
   // ==========================================================================
   let booted = false;
 
@@ -177,6 +446,11 @@
       extEnabled: savedSettings.extEnabled !== false,
       drawMode: Boolean(savedSettings.drawMode),
       ecoMode: Boolean(savedSettings.ecoMode),
+      leftHanded: Boolean(savedSettings.leftHanded),
+      lang: savedSettings.lang === 'en' ? 'en' : 'fr',
+      tutorialSeen: Boolean(savedSettings.tutorialSeen),
+      shortcuts: { ...DEFAULT_SHORTCUTS, ...(savedSettings.shortcuts || {}) },
+      hideAll: false,
       mode: savedSettings.mode || 'paint',
       color: savedSettings.color || '#00f0ff',
       strokeWidth: Number(savedSettings.strokeWidth) || 3.5,
@@ -193,11 +467,14 @@
       cameraActive: false,
       selectedDeviceId: savedSettings.selectedDeviceId || '',
       pinchThreshold: Number(savedSettings.pinchThreshold) || 0.58,
+      showHint: Boolean(savedSettings.showHint),
       windowBounds: savedSettings.windowBounds || null,
       bubblePos: savedSettings.bubblePos || null,
       spacePressed: false,
       leftHandClutch: false
     };
+
+    const t = () => I18N[state.lang] || I18N.fr;
 
     if (document.documentElement) {
       document.documentElement.dataset.vsExtEnabled = state.extEnabled ? 'true' : 'false';
@@ -206,7 +483,6 @@
       localStorage.setItem('vs_ext_enabled', state.extEnabled ? 'true' : 'false');
     } catch (e) {}
 
-    // Écriture dans chrome.storage.local avec debounce de 500 ms
     let saveDebounceTimer = null;
     function scheduleSaveSettings() {
       if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
@@ -217,6 +493,10 @@
             extEnabled: state.extEnabled,
             drawMode: state.drawMode,
             ecoMode: state.ecoMode,
+            leftHanded: state.leftHanded,
+            lang: state.lang,
+            tutorialSeen: state.tutorialSeen,
+            shortcuts: state.shortcuts,
             mode: state.mode,
             color: state.color,
             strokeWidth: state.strokeWidth,
@@ -231,6 +511,7 @@
             showHudOnMeet: state.showHudOnMeet,
             selectedDeviceId: state.selectedDeviceId,
             pinchThreshold: state.pinchThreshold,
+            showHint: state.showHint,
             windowBounds: state.windowBounds,
             bubblePos: state.bubblePos
           });
@@ -238,10 +519,28 @@
       }, 500);
     }
 
+    const shadowHost = document.createElement('div');
+    shadowHost.id = 'vs-shadow-host';
+    shadowHost.style.cssText = 'all:initial;position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
+    document.body.appendChild(shadowHost);
+    const shadow = shadowHost.attachShadow({ mode: 'open' });
+    const $ = (id) => shadow.getElementById(id);
+
     const style = document.createElement('style');
     style.id = 'vs-studio-styles';
     style.textContent = `
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+      .vs-ico {
+        width: 13px;
+        height: 13px;
+        flex-shrink: 0;
+        display: inline-block;
+        vertical-align: middle;
+      }
       #vs-floating-bubble {
+        pointer-events: auto !important;
         position: fixed !important;
         bottom: 88px;
         right: 24px;
@@ -416,7 +715,7 @@
         position: fixed !important;
         bottom: 88px;
         right: 24px;
-        width: 560px;
+        width: 580px;
         min-width: 360px;
         max-width: calc(100vw - 16px);
         background: rgba(8, 9, 12, 0.96);
@@ -440,7 +739,6 @@
         display: none !important;
       }
 
-      /* BARRE D'ONGLETS SUPÉRIEURE AVEC DÉFILEMENT HORIZONTAL FLUIDE */
       .vs-topbar {
         min-height: 34px;
         background: var(--panel);
@@ -557,7 +855,7 @@
         background: var(--danger);
       }
 
-      /* RUBAN CONTEXTUEL + ACTIONS FIGÉES (UNDO / CLEAR) À DROITE */
+      /* RUBAN CONTEXTUEL + ACTIONS FIGÉES (HIDE ALL / UNDO / REDO / CLEAR) */
       .vs-ribbon {
         background: var(--ribbon);
         border-bottom: 1px solid var(--border);
@@ -702,7 +1000,7 @@
         border: 2px solid #fff;
       }
 
-      /* VIEWPORT VIDÉO + POIGNÉE DE REDIMENSIONNEMENT */
+      /* VIEWPORT VIDÉO + MODALES INTERNES (TUTORIEL & RACCOURCIS) */
       .vs-viewport {
         position: relative;
         width: 100%;
@@ -720,17 +1018,56 @@
         position: absolute;
         bottom: 5px;
         left: 7px;
-        right: 26px;
-        background: rgba(0, 0, 0, 0.75);
+        right: 48px;
+        background: rgba(8, 10, 16, 0.86);
         border: 1px solid var(--border);
-        padding: 2px 6px;
+        padding: 3px 7px;
         font-size: 8.8px;
-        color: rgba(255, 255, 255, 0.85);
+        color: rgba(255, 255, 255, 0.88);
         pointer-events: none;
-        border-radius: 3px;
+        border-radius: 4px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 0.16s ease, transform 0.16s ease;
+      }
+      .vs-hint.open {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      #vsHintToggleBtn {
+        position: absolute;
+        bottom: 5px;
+        right: 24px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: rgba(14, 16, 21, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: var(--text);
+        font-family: Georgia, serif;
+        font-style: italic;
+        font-weight: 700;
+        font-size: 11px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 10;
+        padding: 0;
+        transition: all 0.14s ease;
+      }
+      #vsHintToggleBtn:hover {
+        border-color: var(--theme-color);
+        color: var(--theme-color);
+      }
+      #vsHintToggleBtn.active {
+        background: var(--theme-color);
+        border-color: var(--theme-color);
+        color: #000;
       }
       #vsResizeHandle {
         position: absolute;
@@ -752,13 +1089,137 @@
       #vsResizeHandle:hover {
         background: linear-gradient(135deg, transparent 50%, rgba(0, 240, 255, 0.6) 50%);
       }
+      .vs-modal-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(6, 8, 12, 0.92);
+        backdrop-filter: blur(6px);
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 14px;
+        z-index: 20;
+      }
+      .vs-modal-overlay.open {
+        display: flex;
+      }
+      .vs-modal-card {
+        background: #11141d;
+        border: 1px solid var(--theme-color);
+        border-radius: 8px;
+        padding: 12px 14px;
+        max-width: 460px;
+        width: 100%;
+        color: var(--text);
+        font-size: 10px;
+        line-height: 1.45;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.85);
+      }
+      .vs-modal-title {
+        font-weight: 700;
+        font-size: 11px;
+        color: var(--theme-color);
+        margin-bottom: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .vs-sc-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin: 8px 0;
+      }
+      .vs-sc-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: rgba(255, 255, 255, 0.04);
+        padding: 4px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+      }
+      .vs-sc-key {
+        background: #08090c;
+        color: var(--theme-color);
+        border: 1px solid rgba(0, 240, 255, 0.4);
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: inherit;
+        font-size: 9.5px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .vs-sc-key.listening {
+        background: var(--ar-accent);
+        color: #000;
+        border-color: var(--ar-accent);
+      }
+      .vs-tuto-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin: 8px 0 12px;
+      }
+      .vs-tuto-card {
+        background: rgba(255, 255, 255, 0.035);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .vs-tuto-card-head {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--theme-color);
+        font-weight: 700;
+        font-size: 10px;
+      }
+      .vs-tuto-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 9.2px;
+        line-height: 1.4;
+      }
+      .vs-pinch-meter {
+        position: relative;
+        width: 44px;
+        height: 8px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.12);
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      .vs-pinch-fill {
+        height: 100%;
+        width: 0%;
+        background: var(--theme-color);
+        transition: width 0.06s linear, background-color 0.1s ease;
+      }
+      .vs-pinch-fill.pinched {
+        background: var(--success);
+      }
+      .vs-pinch-thresh {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1.5px;
+        background: #fff;
+        opacity: 0.85;
+      }
+      #vs-root-overlay, #vs-mini-preview {
+        pointer-events: auto !important;
+      }
     `;
-    (document.head || document.documentElement).appendChild(style);
+    shadow.appendChild(style);
 
-    // CONTENEUR DE TOASTS NON BLOQUANTS
     const toastContainer = document.createElement('div');
     toastContainer.id = 'vs-toast-container';
-    document.body.appendChild(toastContainer);
+    shadow.appendChild(toastContainer);
 
     function showToast({ id = '', title, message, kind = 'error', duration = 6500, actionLabel = '', onAction = null }) {
       if (id) {
@@ -810,86 +1271,86 @@
       }
     }
 
-    // 2. BULLE FLOTTANTE + MINI-APERÇU LOCAL (224x126 px)
     const bubble = document.createElement('div');
     bubble.id = 'vs-floating-bubble';
-    bubble.title = 'Vision Studio — Cliquer pour ouvrir / Glisser pour déplacer';
-    bubble.innerHTML = `✦<span class="vs-bubble-dot"></span>`;
-    document.body.appendChild(bubble);
+    bubble.title = 'Vision Studio';
+    bubble.innerHTML = `${iconSvg('sparkles', 22)}<span class="vs-bubble-dot"></span>`;
+    shadow.appendChild(bubble);
 
     const miniPreview = document.createElement('div');
     miniPreview.id = 'vs-mini-preview';
-    miniPreview.title = 'Aperçu local Vision Studio (non envoyé tel quel) — Cliquer pour agrandir';
+    miniPreview.title = 'Vision Studio';
     miniPreview.innerHTML = `
       <canvas id="vsMiniPreviewCanvas" width="224" height="126"></canvas>
-      <span class="vs-mini-tag">APERÇU LOCAL</span>
+      <span class="vs-mini-tag" id="vsMiniTagText">APERÇU LOCAL</span>
     `;
-    document.body.appendChild(miniPreview);
+    shadow.appendChild(miniPreview);
     const miniPreviewCanvas = miniPreview.querySelector('#vsMiniPreviewCanvas');
     const miniPreviewCtx = miniPreviewCanvas.getContext('2d');
 
-    // 3. FENÊTRE AVEC RUBAN À 4 ONGLETS + BOUTONS UNDO/CLEAR FIGÉS
     const root = document.createElement('div');
     root.id = 'vs-root-overlay';
     root.innerHTML = `
-      <header class="vs-topbar" id="vsDragHeader" title="Glisser cette barre pour déplacer la fenêtre (Molette sur les onglets pour défiler)">
+      <header class="vs-topbar" id="vsDragHeader">
         <div class="vs-brand">
           <span class="vs-brand-dot"></span>
           <span>VISION</span>
         </div>
 
         <nav class="vs-tabs" id="vsTabsNav">
-          <button class="vs-tab-btn active" data-tab="home">🏠 Accueil</button>
-          <button class="vs-tab-btn" data-tab="insert">➕ Insertion & AR</button>
-          <button class="vs-tab-btn" data-tab="style">🎨 Dessin & Style</button>
-          <button class="vs-tab-btn" data-tab="settings">⚙️ Caméra & IA</button>
+          <button class="vs-tab-btn active" data-tab="home" id="vsTabHome"></button>
+          <button class="vs-tab-btn" data-tab="insert" id="vsTabInsert"></button>
+          <button class="vs-tab-btn" data-tab="style" id="vsTabStyle"></button>
+          <button class="vs-tab-btn" data-tab="settings" id="vsTabSettings"></button>
         </nav>
 
         <div class="vs-status-Cluster">
-          <button class="vs-btn active" id="vsExtActiveBtn" title="Activer ou désactiver l'extension (OFF = vraie caméra directe dans Meet)">🟢 Ext: ON</button>
-          <div class="vs-led-pill" id="vsClutchBadge" title="Embrayage écriture (Maintenir Espace en Mode dessin ou Poing Gauche)">
-            <span class="vs-led-dot"></span><span id="vsClutchText">⚡ OFF</span>
+          <button class="vs-btn active" id="vsExtActiveBtn"></button>
+          <div class="vs-led-pill" id="vsClutchBadge">
+            <span class="vs-led-dot"></span><span id="vsClutchText">OFF</span>
           </div>
-          <div class="vs-led-pill" id="vsAiBadge" title="Statut du suivi des mains MediaPipe">
+          <div class="vs-led-pill" id="vsAiBadge">
             <span class="vs-led-dot"></span><span id="vsAiText">IA…</span>
           </div>
-          <button class="vs-btn active" id="vsPreviewToggleBtn" title="Afficher / Masquer le retour vidéo">📺</button>
-          <button class="vs-btn" id="vsCollapseBtn" title="Réduire dans la bulle flottante">➖</button>
+          <button class="vs-btn" id="vsLangBtn"></button>
+          <button class="vs-btn" id="vsTutorialBtn">${iconSvg('help')}</button>
+          <button class="vs-btn active" id="vsPreviewToggleBtn">${iconSvg('tv')}</button>
+          <button class="vs-btn" id="vsCollapseBtn">${iconSvg('minus')}</button>
         </div>
       </header>
 
       <div class="vs-ribbon">
         <!-- ONGLET 1 : ACCUEIL -->
         <div class="vs-ribbon-pane active" data-pane="home">
-          <button class="vs-btn" id="vsCamBtn">📷 START CAM</button>
-          <button class="vs-btn vs-btn-danger" id="vsStopCamBtn" title="Arrêter les pistes caméra et rendre la barre Espace à Meet">⏹️ STOP CAM</button>
-          <button class="vs-btn vs-btn-drawmode" id="vsDrawModeBtn" title="Capturer Espace pour dessiner (OFF = Push-to-Talk Meet actif)">✍️ Mode dessin: OFF</button>
+          <button class="vs-btn" id="vsCamBtn"></button>
+          <button class="vs-btn vs-btn-danger" id="vsStopCamBtn"></button>
+          <button class="vs-btn vs-btn-drawmode" id="vsDrawModeBtn"></button>
           <div class="vs-sep"></div>
-          <button class="vs-btn vs-btn-laser" id="vsLaserQuickBtn" title="Encre éphémère qui disparaît au bout de 2 secondes">☄️ Laser</button>
-          <button class="vs-btn vs-btn-danger" id="vsEraserBtn" title="Gomme au doigt">🧽 Gomme</button>
+          <button class="vs-btn vs-btn-laser" id="vsLaserQuickBtn"></button>
+          <button class="vs-btn vs-btn-danger" id="vsEraserBtn"></button>
         </div>
 
         <!-- ONGLET 2 : INSERTION & RÉALITÉ AUGMENTÉE -->
         <div class="vs-ribbon-pane" data-pane="insert">
-          <button class="vs-btn vs-btn-ar" id="vsArWinBtn" title="Capturer une fenêtre (Excel, VS Code, Chrome) en direct (15 fps max, 3 max)">🖥️ Fenêtre AR</button>
-          <button class="vs-btn vs-btn-ar" id="vsArImgBtn" title="Importer une image (ou Ctrl+V)">🖼️ Image</button>
+          <button class="vs-btn vs-btn-ar" id="vsArWinBtn"></button>
+          <button class="vs-btn vs-btn-ar" id="vsArImgBtn"></button>
           <input type="file" id="vsArFileInput" accept="image/*" style="display:none;" />
           <div class="vs-control-group">
-            <input type="text" id="vsArTextInput" placeholder="Note Texte AR…" title="Tape un texte puis Entrée pour créer une carte AR" />
-            <button class="vs-btn vs-btn-ar" id="vsArTextAddBtn" title="Ajouter la note en réalité augmentée">➕</button>
+            <input type="text" id="vsArTextInput" placeholder="Note Texte AR…" />
+            <button class="vs-btn vs-btn-ar" id="vsArTextAddBtn">${iconSvg('plus')}</button>
           </div>
           <div class="vs-sep"></div>
-          <button class="vs-btn" id="vsAirMenuToggleBtn" title="Afficher/Masquer la barre des 6 formes géométriques sur la vidéo">📐 Formes: OFF</button>
-          <div class="vs-control-group" title="Transparence des fenêtres AR (pour te voir à travers)">
-            <span>Opacité</span>
+          <button class="vs-btn" id="vsAirMenuToggleBtn"></button>
+          <div class="vs-control-group">
+            <span id="vsOpacityLabel">Opacité</span>
             <input type="range" id="vsArOpacitySlider" min="0.25" max="1" step="0.05" value="0.92" />
           </div>
-          <button class="vs-btn" id="vsArFlipBtn" title="Inverser horizontalement les fenêtres AR">⇄ Flip AR</button>
+          <button class="vs-btn" id="vsArFlipBtn"></button>
         </div>
 
         <!-- ONGLET 3 : DESSIN & STYLE -->
         <div class="vs-ribbon-pane" data-pane="style">
-          <button class="vs-btn vs-btn-laser" id="vsLaserStyleBtn" title="Le trait s'efface tout seul après 2 secondes">☄️ Mode Laser (2s)</button>
+          <button class="vs-btn vs-btn-laser" id="vsLaserStyleBtn"></button>
           <div class="vs-sep"></div>
           <div class="vs-swatches">
             <div class="vs-swatch active" data-color="#00f0ff" style="background:#00f0ff"></div>
@@ -902,11 +1363,11 @@
           </div>
           <div class="vs-sep"></div>
           <div class="vs-control-group">
-            <span>Trait</span>
+            <span id="vsStrokeLabel">Trait</span>
             <input type="range" id="vsStrokeSlider" min="1.5" max="12" step="0.5" value="3.5" />
           </div>
-          <button class="vs-btn" id="vsSmartBtn" title="Reconnaissance automatique de formes géométriques (cercle, rectangle, ligne) à la fin du tracé">✦ Smart Shape</button>
-          <button class="vs-btn" id="vsFillBtn" title="Remplir les formes géométriques">▢ Fill</button>
+          <button class="vs-btn" id="vsSmartBtn"></button>
+          <button class="vs-btn" id="vsFillBtn"></button>
         </div>
 
         <!-- ONGLET 4 : CAMÉRA & IA -->
@@ -915,36 +1376,96 @@
             <span>Cam</span>
             <select id="vsCameraSelect"><option value="">Caméra PC / Tel</option></select>
           </div>
-          <div class="vs-control-group" title="Sensibilité du pincement des doigts">
+          <div class="vs-control-group">
             <span>Pinch</span>
             <input type="range" id="vsPinchSlider" min="0.35" max="0.85" step="0.02" value="0.58" />
+            <div class="vs-pinch-meter" id="vsPinchMeter" title="Pinch live">
+              <div class="vs-pinch-fill" id="vsPinchFill"></div>
+              <div class="vs-pinch-thresh" id="vsPinchThresh"></div>
+            </div>
           </div>
           <div class="vs-sep"></div>
-          <button class="vs-btn active" id="vsMirrorBtn" title="Inverser uniquement l'aperçu local en miroir">⇄ Miroir</button>
-          <button class="vs-btn" id="vsHudMeetBtn" title="Montrer ou cacher le curseur et le HUD aux participants Meet">👁️ HUD Meet: OFF</button>
-          <button class="vs-btn" id="vsBwBtn" title="Filtre Noir & Blanc">◑ N&B</button>
-          <button class="vs-btn" id="vsEcoBtn" title="Mode économie : allège le CPU/GPU (IA 15 fps, flux 20 fps, sans flous lumineux)">🍃 Éco: OFF</button>
+          <button class="vs-btn active" id="vsMirrorBtn"></button>
+          <button class="vs-btn" id="vsLeftHandedBtn"></button>
+          <button class="vs-btn" id="vsHudMeetBtn"></button>
+          <button class="vs-btn" id="vsBwBtn"></button>
+          <button class="vs-btn" id="vsEcoBtn"></button>
+          <button class="vs-btn" id="vsShortcutsBtn"></button>
         </div>
 
-        <!-- ZONE FIGÉE À DROITE SUR TOUS LES ONGLETS : UNDO & CLEAR -->
+        <!-- ZONE FIGÉE À DROITE SUR TOUS LES ONGLETS : TOUT MASQUER, UNDO, REDO, CLEAR -->
         <div class="vs-ribbon-pinned">
-          <button class="vs-btn" id="vsUndoBtn" title="Annuler le dernier élément">↩</button>
-          <button class="vs-btn" id="vsClearBtn" title="Tout effacer">✕ Clear</button>
+          <button class="vs-btn" id="vsHideAllBtn"></button>
+          <button class="vs-btn" id="vsUndoBtn">${iconSvg('undo')}</button>
+          <button class="vs-btn" id="vsRedoBtn">${iconSvg('redo')}</button>
+          <button class="vs-btn" id="vsClearBtn"></button>
         </div>
       </div>
 
       <main class="vs-viewport" id="vsViewport">
         <canvas id="vsMainCanvas"></canvas>
-        <div class="vs-hint" id="vsHintText">
-          GESTES AUTO : [POING G] ou [ESPACE] = DESSINER · [PINCER 1 MAIN] = DÉPLACER · [PINCER 2 MAINS] = ZOOMER
+        <div class="vs-hint" id="vsHintText"></div>
+        <button type="button" id="vsHintToggleBtn" aria-label="Infos">i</button>
+        <div id="vsResizeHandle">◢</div>
+
+        <!-- MODALE TUTORIEL -->
+        <div class="vs-modal-overlay" id="vsTutorialModal">
+          <div class="vs-modal-card">
+            <div class="vs-modal-title">
+              <span id="vsTutoTitleText"></span>
+            </div>
+            <div class="vs-tuto-grid">
+              <div class="vs-tuto-card">
+                <div class="vs-tuto-card-head">${iconSvg('pen')}<span id="vsTutoCard1Title"></span></div>
+                <p id="vsTutoStep1"></p>
+              </div>
+              <div class="vs-tuto-card">
+                <div class="vs-tuto-card-head">${iconSvg('hand')}<span id="vsTutoCard2Title"></span></div>
+                <p id="vsTutoStep2"></p>
+              </div>
+              <div class="vs-tuto-card">
+                <div class="vs-tuto-card-head">${iconSvg('layers')}<span id="vsTutoCard3Title"></span></div>
+                <p id="vsTutoStep3"></p>
+              </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end;">
+              <button class="vs-btn active" id="vsTutorialCloseBtn"></button>
+            </div>
+          </div>
         </div>
-        <div id="vsResizeHandle" title="Glisser pour agrandir ou rétrécir la fenêtre">◢</div>
+
+        <!-- MODALE RACCOURCIS CLAVIER CONFIGURABLES -->
+        <div class="vs-modal-overlay" id="vsShortcutsModal">
+          <div class="vs-modal-card">
+            <div class="vs-modal-title">
+              <span id="vsScTitleText"></span>
+              <button class="vs-btn" id="vsShortcutsCloseBtn">${iconSvg('close')}</button>
+            </div>
+            <div class="vs-sc-grid">
+              <div class="vs-sc-item"><span id="vsScLblDrawMode"></span><button class="vs-sc-key" data-sc="drawMode"></button></div>
+              <div class="vs-sc-item"><span id="vsScLblLaser"></span><button class="vs-sc-key" data-sc="laser"></button></div>
+              <div class="vs-sc-item"><span id="vsScLblEraser"></span><button class="vs-sc-key" data-sc="eraser"></button></div>
+              <div class="vs-sc-item"><span id="vsScLblHideAll"></span><button class="vs-sc-key" data-sc="hideAll"></button></div>
+              <div class="vs-sc-item"><span id="vsScLblUndo"></span><button class="vs-sc-key" data-sc="undo"></button></div>
+              <div class="vs-sc-item"><span id="vsScLblRedo"></span><button class="vs-sc-key" data-sc="redo"></button></div>
+            </div>
+            <div id="vsScHintText" style="color:var(--muted); font-size:9px; margin-top:4px;"></div>
+          </div>
+        </div>
       </main>
     `;
-    document.body.appendChild(root);
+    shadow.appendChild(root);
 
-    const resizeHandle = document.getElementById('vsResizeHandle');
-    const viewportEl = document.getElementById('vsViewport');
+    const resizeHandle = $('vsResizeHandle');
+    const viewportEl = $('vsViewport');
+    const tutorialModal = $('vsTutorialModal');
+    const shortcutsModal = $('vsShortcutsModal');
+    const clutchBadge = $('vsClutchBadge');
+    const clutchText = $('vsClutchText');
+    const aiBadge = $('vsAiBadge');
+    const aiText = $('vsAiText');
+    let aiReady = false;
+    let aiStatusKind = 'loading';
 
     function applyStoredGeometry() {
       if (state.bubblePos && typeof state.bubblePos.left === 'number' && typeof state.bubblePos.top === 'number') {
@@ -976,49 +1497,116 @@
       }
     }
 
+    function applyLanguageUI() {
+      const tr = t();
+      setBtn($('vsLangBtn'), 'globe', state.lang === 'en' ? 'EN' : 'FR');
+      setBtn($('vsTabHome'), 'home', tr.tabHome);
+      setBtn($('vsTabInsert'), 'layers', tr.tabInsert);
+      setBtn($('vsTabStyle'), 'palette', tr.tabStyle);
+      setBtn($('vsTabSettings'), 'sliders', tr.tabSettings);
+
+      setBtn($('vsCamBtn'), 'video', state.cameraActive ? tr.camOn : tr.startCam);
+      setBtn($('vsStopCamBtn'), 'stop', tr.stopCam);
+      setBtn($('vsDrawModeBtn'), 'pen', state.drawMode ? tr.drawModeOn : tr.drawModeOff);
+
+      setBtn($('vsLaserQuickBtn'), 'laser', tr.laser);
+      setBtn($('vsLaserStyleBtn'), 'laser', tr.laserStyle);
+      setBtn($('vsEraserBtn'), 'eraser', tr.eraser);
+
+      setBtn($('vsArWinBtn'), 'monitor', tr.arWin);
+      setBtn($('vsArImgBtn'), 'image', tr.arImg);
+      $('vsArTextInput').placeholder = tr.arTextPlaceholder;
+
+      setBtn($('vsAirMenuToggleBtn'), 'shapes', state.showAirMenu ? tr.shapesOn : tr.shapesOff);
+      setBtn($('vsArFlipBtn'), 'flip', tr.flipAr);
+
+      $('vsOpacityLabel').textContent = tr.opacity;
+      $('vsStrokeLabel').textContent = tr.stroke;
+      setBtn($('vsSmartBtn'), 'sparkles', tr.smartShape);
+      setBtn($('vsFillBtn'), 'square', tr.fill);
+
+      setBtn($('vsMirrorBtn'), 'flip', tr.mirror);
+      setBtn($('vsLeftHandedBtn'), 'hand', state.leftHanded ? tr.leftHandedOn : tr.leftHandedOff);
+      setBtn($('vsHudMeetBtn'), state.showHudOnMeet ? 'eye' : 'eyeOff', state.showHudOnMeet ? tr.hudMeetOn : tr.hudMeetOff);
+      setBtn($('vsBwBtn'), 'contrast', tr.bw);
+      setBtn($('vsEcoBtn'), 'leaf', state.ecoMode ? tr.ecoOn : tr.ecoOff);
+      setBtn($('vsShortcutsBtn'), 'keyboard', tr.shortcutsBtn);
+
+      setBtn($('vsHideAllBtn'), state.hideAll ? 'eyeOff' : 'eye', state.hideAll ? tr.hideAllOn : tr.hideAllOff);
+      setBtn($('vsClearBtn'), 'trash', tr.clear);
+
+      setBtn($('vsExtActiveBtn'), 'power', state.extEnabled ? tr.extOn : tr.extOff);
+
+      $('vsHintText').textContent = tr.hint;
+      $('vsHintToggleBtn').title = tr.infoHintTitle;
+      $('vsMiniTagText').textContent = tr.localPreview;
+
+      $('vsTutoTitleText').textContent = tr.tutoTitle;
+      $('vsTutoCard1Title').textContent = tr.tutoCard1Title;
+      $('vsTutoStep1').textContent = tr.tutoStep1;
+      $('vsTutoCard2Title').textContent = tr.tutoCard2Title;
+      $('vsTutoStep2').textContent = tr.tutoStep2;
+      $('vsTutoCard3Title').textContent = tr.tutoCard3Title;
+      $('vsTutoStep3').textContent = tr.tutoStep3;
+      $('vsTutorialCloseBtn').textContent = tr.tutoClose;
+
+      $('vsScTitleText').textContent = tr.scTitle;
+      $('vsScHintText').textContent = tr.scHint;
+      $('vsScLblDrawMode').textContent = tr.scDrawMode;
+      $('vsScLblLaser').textContent = tr.scLaser;
+      $('vsScLblEraser').textContent = tr.scEraser;
+      $('vsScLblHideAll').textContent = tr.scHideAll;
+      $('vsScLblUndo').textContent = tr.scUndo;
+      $('vsScLblRedo').textContent = tr.scRedo;
+
+      if (typeof updateClutchBadge === 'function') updateClutchBadge();
+      if (typeof setAiStatus === 'function' && typeof aiStatusKind !== 'undefined') setAiStatus(aiStatusKind);
+    }
+
+    function renderShortcutsButtons() {
+      root.querySelectorAll('.vs-sc-key').forEach((btn) => {
+        const keyName = btn.dataset.sc;
+        const code = state.shortcuts[keyName] || '—';
+        btn.textContent = code.replace(/^Key/, '').replace(/^Digit/, '');
+      });
+    }
+
     function applyStoredControlsToUI() {
       root.style.setProperty('--theme-color', state.color);
-      const colorPicker = document.getElementById('vsColorPicker');
+      const colorPicker = $('vsColorPicker');
       if (colorPicker) colorPicker.value = state.color;
 
       root.querySelectorAll('.vs-swatch').forEach(sw => {
         sw.classList.toggle('active', sw.dataset.color.toLowerCase() === state.color.toLowerCase());
       });
 
-      document.getElementById('vsStrokeSlider').value = String(state.strokeWidth);
-      document.getElementById('vsArOpacitySlider').value = String(state.arOpacity);
-      document.getElementById('vsPinchSlider').value = String(state.pinchThreshold);
+      $('vsStrokeSlider').value = String(state.strokeWidth);
+      $('vsArOpacitySlider').value = String(state.arOpacity);
+      $('vsPinchSlider').value = String(state.pinchThreshold);
 
-      const drawBtn = document.getElementById('vsDrawModeBtn');
-      drawBtn.classList.toggle('active', state.drawMode);
-      drawBtn.textContent = state.drawMode ? '✍️ Mode dessin: ON' : '✍️ Mode dessin: OFF';
+      $('vsDrawModeBtn').classList.toggle('active', state.drawMode);
+      $('vsLaserQuickBtn').classList.toggle('active', state.laserMode);
+      $('vsLaserStyleBtn').classList.toggle('active', state.laserMode);
+      $('vsAirMenuToggleBtn').classList.toggle('active', state.showAirMenu);
+      $('vsSmartBtn').classList.toggle('active', state.smartShape);
+      $('vsFillBtn').classList.toggle('active', state.filled);
+      $('vsMirrorBtn').classList.toggle('active', state.mirror);
+      $('vsLeftHandedBtn').classList.toggle('active', state.leftHanded);
+      $('vsBwBtn').classList.toggle('active', state.bwFilter);
+      $('vsArFlipBtn').classList.toggle('active', state.arFlip);
+      $('vsEcoBtn').classList.toggle('active', state.ecoMode);
+      $('vsHudMeetBtn').classList.toggle('active', state.showHudOnMeet);
+      $('vsHintText').classList.toggle('open', state.showHint);
+      $('vsHintToggleBtn').classList.toggle('active', state.showHint);
 
-      document.getElementById('vsLaserQuickBtn').classList.toggle('active', state.laserMode);
-      document.getElementById('vsLaserStyleBtn').classList.toggle('active', state.laserMode);
-
-      const airMenuBtn = document.getElementById('vsAirMenuToggleBtn');
-      airMenuBtn.classList.toggle('active', state.showAirMenu);
-      airMenuBtn.textContent = state.showAirMenu ? '📐 Formes: ON' : '📐 Formes: OFF';
-
-      document.getElementById('vsSmartBtn').classList.toggle('active', state.smartShape);
-      document.getElementById('vsFillBtn').classList.toggle('active', state.filled);
-      document.getElementById('vsMirrorBtn').classList.toggle('active', state.mirror);
-      document.getElementById('vsBwBtn').classList.toggle('active', state.bwFilter);
-      document.getElementById('vsArFlipBtn').classList.toggle('active', state.arFlip);
-
-      const hudBtn = document.getElementById('vsHudMeetBtn');
-      hudBtn.classList.toggle('active', state.showHudOnMeet);
-      hudBtn.textContent = state.showHudOnMeet ? '👁️ HUD Meet: ON' : '👁️ HUD Meet: OFF';
-
-      const ecoBtn = document.getElementById('vsEcoBtn');
-      ecoBtn.classList.toggle('active', state.ecoMode);
-      ecoBtn.textContent = state.ecoMode ? '🍃 Éco: ON' : '🍃 Éco: OFF';
+      renderShortcutsButtons();
+      applyLanguageUI();
     }
 
     applyStoredGeometry();
     applyStoredControlsToUI();
 
-    const tabsNav = document.getElementById('vsTabsNav');
+    const tabsNav = $('vsTabsNav');
     tabsNav.addEventListener('wheel', (e) => {
       if (e.deltaY !== 0) {
         e.preventDefault();
@@ -1045,8 +1633,10 @@
     sourceVideo.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1;';
     document.body.appendChild(sourceVideo);
 
+    const SANDBOX_URL = chrome.runtime.getURL('sandbox.html');
+    const SANDBOX_ORIGIN = new URL(SANDBOX_URL).origin;
     const sandboxFrame = document.createElement('iframe');
-    sandboxFrame.src = chrome.runtime.getURL('sandbox.html');
+    sandboxFrame.src = SANDBOX_URL;
     sandboxFrame.style.cssText = 'position:fixed;right:0;bottom:0;width:2px;height:2px;border:0;opacity:0.01;pointer-events:none;z-index:-1;';
     document.body.appendChild(sandboxFrame);
 
@@ -1079,15 +1669,35 @@
       miniPreview.style.top = `${Math.round(top)}px`;
     }
 
-    function syncVisibility() {
-      if (!style.isConnected) (document.head || document.documentElement).appendChild(style);
-      if (!toastContainer.isConnected) document.body.appendChild(toastContainer);
-      if (!bubble.isConnected) document.body.appendChild(bubble);
-      if (!miniPreview.isConnected) document.body.appendChild(miniPreview);
-      if (!root.isConnected) document.body.appendChild(root);
+    function updatePinchThreshMarker() {
+      const marker = $('vsPinchThresh');
+      if (!marker) return;
+      // pinchRatio ~ 0 (serré) -> 1.2 (ouvert). Plus la barre est remplie, plus les doigts sont proches.
+      const pct = Math.max(0, Math.min(100, (1 - state.pinchThreshold / 1.2) * 100));
+      marker.style.left = `${pct.toFixed(1)}%`;
+    }
+
+    function updatePinchMeter(domHand) {
+      const fill = $('vsPinchFill');
+      if (!fill) return;
+      if (!domHand) {
+        fill.style.width = '0%';
+        fill.classList.remove('pinched');
+        return;
+      }
+      const pct = Math.max(0, Math.min(100, (1 - Math.min(1.2, domHand.pinchRatio) / 1.2) * 100));
+      fill.style.width = `${pct.toFixed(0)}%`;
+      fill.classList.toggle('pinched', Boolean(domHand.isPinching));
+    }
+
+    function ensureDomConnected() {
+      if (!shadowHost.isConnected) document.body.appendChild(shadowHost);
       if (!sourceVideo.isConnected) document.body.appendChild(sourceVideo);
       if (!sandboxFrame.isConnected) document.body.appendChild(sandboxFrame);
+    }
 
+    function syncVisibility() {
+      ensureDomConnected();
       root.classList.toggle('vs-open', panelOpen);
       bubble.classList.toggle('vs-hidden', panelOpen);
       positionMiniPreview();
@@ -1096,6 +1706,9 @@
     function openPanel() {
       panelOpen = true;
       syncVisibility();
+      if (!state.tutorialSeen) {
+        tutorialModal.classList.add('open');
+      }
     }
 
     function collapseToBubble() {
@@ -1107,8 +1720,10 @@
       openPanel();
     });
 
-    setInterval(syncVisibility, 800);
+    window.addEventListener('resize', positionMiniPreview);
+    setInterval(ensureDomConnected, 1500);
     syncVisibility();
+    updatePinchThreshMarker();
 
     // 4. DRAG & DROP DE LA BULLE FLOTTANTE
     let bDrag = { active: false, moved: false, startX: 0, startY: 0, initLeft: 0, initTop: 0 };
@@ -1150,7 +1765,7 @@
     });
 
     // 5. DRAG & DROP DE LA FENÊTRE VISION STUDIO
-    const dragHeader = document.getElementById('vsDragHeader');
+    const dragHeader = $('vsDragHeader');
     let wDrag = { active: false, startX: 0, startY: 0, initLeft: 0, initTop: 0 };
 
     function recordWindowBounds() {
@@ -1197,7 +1812,7 @@
     });
 
     // 6. REDIMENSIONNEMENT DE LA FENÊTRE
-    let rDrag = { active: false, startX: 0, startY: 0, startW: 560, startH: 270 };
+    let rDrag = { active: false, startX: 0, startY: 0, startW: 580, startH: 270 };
 
     resizeHandle.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -1235,24 +1850,36 @@
 
     document.addEventListener('pointerdown', (e) => {
       if (!panelOpen || performance.now() < ignoreOutsideClickUntil) return;
-      if (!root.contains(e.target) && !bubble.contains(e.target) && !toastContainer.contains(e.target)) {
+      const path = e.composedPath ? e.composedPath() : [e.target];
+      if (!path.includes(root) && !path.includes(bubble) && !path.includes(toastContainer)) {
         collapseToBubble();
       }
     }, true);
 
-    document.getElementById('vsCollapseBtn').addEventListener('click', (e) => {
+    $('vsCollapseBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       collapseToBubble();
     });
 
-    document.getElementById('vsPreviewToggleBtn').addEventListener('click', (e) => {
+    $('vsPreviewToggleBtn').addEventListener('click', (e) => {
       const hidden = root.classList.toggle('hide-preview');
       e.currentTarget.classList.toggle('active', !hidden);
       e.currentTarget.blur();
     });
 
+    const hintToggleBtn = $('vsHintToggleBtn');
+    hintToggleBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    hintToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.showHint = !state.showHint;
+      $('vsHintText').classList.toggle('open', state.showHint);
+      hintToggleBtn.classList.toggle('active', state.showHint);
+      scheduleSaveSettings();
+      e.currentTarget.blur();
+    });
+
     // ==========================================================================
-    // 7. MOTEUR GRAPHIQUE, CACHE HORS-ÉCRAN, PLAFONDS & MEDIAPIPE
+    // 7. MOTEUR GRAPHIQUE, CACHE HORS-ÉCRAN, RELAIS MINUTEUR N4 & MEDIAPIPE
     // ==========================================================================
     const aiMiniCanvas = document.createElement('canvas');
     aiMiniCanvas.width = 384;
@@ -1261,19 +1888,23 @@
 
     let sandboxBusy = false;
     let lastSentTime = 0;
-    let aiReady = false;
+    let bgTimerReady = false;
 
-    const mainCanvas = document.getElementById('vsMainCanvas');
+    // Relais du minuteur d'arrière-plan vers sandbox.html (N4)
+    const bgTimerWorker = {
+      postMessage(cmd) {
+        if (sandboxFrame && sandboxFrame.contentWindow) {
+          sandboxFrame.contentWindow.postMessage({ type: 'VS_TIMER', cmd }, SANDBOX_ORIGIN);
+        }
+      }
+    };
+
+    const mainCanvas = $('vsMainCanvas');
     const ctx = mainCanvas.getContext('2d');
-    const clutchBadge = document.getElementById('vsClutchBadge');
-    const clutchText = document.getElementById('vsClutchText');
-    const aiBadge = document.getElementById('vsAiBadge');
-    const aiText = document.getElementById('vsAiText');
 
     mainCanvas.width = 960;
     mainCanvas.height = 540;
 
-    // Calques de cache hors-écran pour les formes statiques (local et flux sortant)
     const localStaticCacheCanvas = document.createElement('canvas');
     localStaticCacheCanvas.width = 960;
     localStaticCacheCanvas.height = 540;
@@ -1287,6 +1918,7 @@
     let streamStaticSignature = '';
 
     let shapes = [];
+    let redoStack = [];
     let shapeCounter = 1;
     let handsData = [];
     let prevHandsPinching = { R: false, L: false };
@@ -1314,27 +1946,60 @@
       { type: 'triangle', label: 'TRIANGLE' },
       { type: 'star', label: 'STAR' },
       { type: 'hexagon', label: 'HEXAGON' },
-      { type: 'line', label: 'LINE' }
+      { type: 'line', label: 'LINE' },
+      { type: 'arrow', label: 'ARROW' },
+      { type: 'diamond', label: 'DIAMOND' }
     ];
 
     function setAiStatus(kind, msg) {
+      aiStatusKind = kind;
       aiReady = kind === 'ready';
       aiBadge.classList.toggle('on', kind === 'ready');
       aiBadge.classList.toggle('err', kind === 'error');
-      aiText.textContent = kind === 'ready' ? 'IA OK' : (kind === 'error' ? 'IA ERR' : 'IA…');
+      const tr = t();
+      aiText.textContent = kind === 'ready' ? tr.aiReady : (kind === 'error' ? tr.aiError : tr.aiLoading);
       if (msg) aiBadge.title = msg;
     }
 
+    let mediaPipeLoadTimer = null;
+
+    function clearMediaPipeTimeout() {
+      if (mediaPipeLoadTimer) {
+        clearTimeout(mediaPipeLoadTimer);
+        mediaPipeLoadTimer = null;
+      }
+    }
+
+    function startMediaPipeTimeout() {
+      clearMediaPipeTimeout();
+      mediaPipeLoadTimer = setTimeout(() => {
+        mediaPipeLoadTimer = null;
+        if (!aiReady) {
+          setAiStatus('error', t().toastMpTimeoutTitle);
+          showToast({
+            id: 'mp-error',
+            title: t().toastMpTimeoutTitle,
+            message: t().toastMpTimeoutMsg,
+            kind: 'error',
+            duration: 12000,
+            actionLabel: t().retryBtn,
+            onAction: retryMediaPipeSandbox
+          });
+        }
+      }, 10000);
+    }
+
     function retryMediaPipeSandbox() {
-      setAiStatus('loading', 'Rechargement de MediaPipe…');
+      setAiStatus('loading');
       sandboxBusy = false;
+      startMediaPipeTimeout();
       sandboxFrame.src = chrome.runtime.getURL('sandbox.html') + '?retry=' + Date.now();
     }
 
     function setThemeColor(hex) {
       state.color = hex;
       root.style.setProperty('--theme-color', hex);
-      const picker = document.getElementById('vsColorPicker');
+      const picker = $('vsColorPicker');
       if (picker && picker.value.toLowerCase() !== hex.toLowerCase()) {
         picker.value = hex;
       }
@@ -1352,10 +2017,10 @@
 
     function setDrawMode(enabled) {
       state.drawMode = Boolean(enabled);
-      const drawBtn = document.getElementById('vsDrawModeBtn');
+      const drawBtn = $('vsDrawModeBtn');
       if (drawBtn) {
         drawBtn.classList.toggle('active', state.drawMode);
-        drawBtn.textContent = state.drawMode ? '✍️ Mode dessin: ON' : '✍️ Mode dessin: OFF';
+        setBtn(drawBtn, 'pen', state.drawMode ? t().drawModeOn : t().drawModeOff);
       }
       syncSpaceGuard();
       updateClutchBadge();
@@ -1366,11 +2031,20 @@
       state.laserMode = !state.laserMode;
       if (state.laserMode) {
         state.eraser = false;
-        document.getElementById('vsEraserBtn').classList.remove('active');
+        $('vsEraserBtn').classList.remove('active');
       }
-      document.getElementById('vsLaserQuickBtn').classList.toggle('active', state.laserMode);
-      document.getElementById('vsLaserStyleBtn').classList.toggle('active', state.laserMode);
+      $('vsLaserQuickBtn').classList.toggle('active', state.laserMode);
+      $('vsLaserStyleBtn').classList.toggle('active', state.laserMode);
       scheduleSaveSettings();
+    }
+
+    function toggleHideAll() {
+      state.hideAll = !state.hideAll;
+      const hideBtn = $('vsHideAllBtn');
+      if (hideBtn) {
+        hideBtn.classList.toggle('active', state.hideAll);
+        setBtn(hideBtn, state.hideAll ? 'eyeOff' : 'eye', state.hideAll ? t().hideAllOn : t().hideAllOff);
+      }
     }
 
     guard.onDown = () => { state.spacePressed = true; updateClutchBadge(); };
@@ -1382,13 +2056,15 @@
 
     function updateClutchBadge() {
       const engaged = isClutchEngaged();
+      const tr = t();
       clutchBadge.classList.toggle('on', engaged);
       bubble.classList.toggle('clutch-active', engaged);
       if (engaged) {
-        const src = (state.drawMode && state.spacePressed) ? 'ESP' : 'POING G';
-        clutchText.textContent = `⚡ ${src}`;
+        const fistLabel = state.leftHanded ? tr.clutchFistR : tr.clutchFistL;
+        const src = (state.drawMode && state.spacePressed) ? tr.clutchSpace : fistLabel;
+        clutchText.textContent = src;
       } else {
-        clutchText.textContent = '⚡ OFF';
+        clutchText.textContent = tr.clutchOff;
       }
     }
 
@@ -1399,7 +2075,7 @@
     function cleanupShapeResources(s) {
       if (!s) return;
       if (s.mediaStream) {
-        try { s.mediaStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+        try { s.mediaStream.getTracks().forEach(tr => tr.stop()); } catch (e) {}
       }
       if (s.videoEl && s.videoEl.parentNode) {
         try { s.videoEl.parentNode.removeChild(s.videoEl); } catch (e) {}
@@ -1410,14 +2086,55 @@
       }
     }
 
-    // Plafond de 300 objets et 3 fenêtres AR
+    function clearRedoStack() {
+      while (redoStack.length > 0) {
+        const item = redoStack.pop();
+        if (item && !shapes.includes(item)) {
+          cleanupShapeResources(item);
+        }
+      }
+    }
+
+    function setArMediaPaused(s, paused) {
+      if (!s || s.type !== 'ar-window') return;
+      if (s.mediaStream) {
+        try {
+          s.mediaStream.getVideoTracks().forEach(tr => { tr.enabled = !paused; });
+        } catch (e) {}
+      }
+      if (s.videoEl) {
+        try {
+          if (paused) s.videoEl.pause();
+          else s.videoEl.play().catch(() => {});
+        } catch (e) {}
+      }
+    }
+
+    function performUndo() {
+      if (shapes.length === 0) return;
+      const removed = shapes.pop();
+      if (removed) {
+        setArMediaPaused(removed, true);
+        redoStack.push(removed);
+      }
+    }
+
+    function performRedo() {
+      if (redoStack.length === 0) return;
+      const restored = redoStack.pop();
+      if (restored) {
+        setArMediaPaused(restored, false);
+        shapes.push(restored);
+      }
+    }
+
     function checkArObjectCap() {
       const currentArCount = shapes.filter(isArObject).length;
       if (currentArCount >= MAX_AR_OBJECTS) {
         showToast({
           id: 'ar-cap',
-          title: 'Plafond AR atteint (3 max)',
-          message: `Vous avez déjà ${MAX_AR_OBJECTS} objets AR actifs. Fermez-en un avec [✕] avant d'en ajouter un nouveau.`,
+          title: t().toastArCapTitle,
+          message: t().toastArCapMsg,
           kind: 'warn',
           duration: 4500
         });
@@ -1428,6 +2145,7 @@
 
     function pushShapeWithCap(newObj) {
       if (!newObj) return;
+      clearRedoStack();
       shapes.push(newObj);
       while (shapes.length > MAX_SHAPES) {
         const idx = shapes.findIndex(s => !isArObject(s));
@@ -1440,7 +2158,6 @@
       }
     }
 
-    // ANCRAGE DES ANNOTATIONS SUR LES FENÊTRES AR
     function findArObjectUnderPoint(x, y) {
       for (let i = shapes.length - 1; i >= 0; i--) {
         const s = shapes[i];
@@ -1532,7 +2249,7 @@
     function createArMediaObject(type, mediaEl, naturalW, naturalH, labelText, mediaStream = null) {
       if (!checkArObjectCap()) {
         if (mediaStream) {
-          try { mediaStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+          try { mediaStream.getTracks().forEach(tr => tr.stop()); } catch (e) {}
         }
         return null;
       }
@@ -1653,15 +2370,14 @@
         }
       } catch (err) {
         showToast({
-          title: 'Capture d’écran annulée',
-          message: 'Aucune fenêtre ou écran n’a été sélectionné pour la projection AR.',
+          title: t().toastCaptureCancelTitle,
+          message: t().toastCaptureCancelMsg,
           kind: 'warn',
           duration: 4000
         });
       }
     }
 
-    // Révocation systématique d'ObjectURL après chargement ou erreur
     function loadArImageFromBlob(blob, labelName = 'TABLEAU / IMAGE') {
       if (!checkArObjectCap()) return;
       const url = URL.createObjectURL(blob);
@@ -1676,13 +2392,13 @@
       img.src = url;
     }
 
-    document.getElementById('vsArWinBtn').addEventListener('click', (e) => {
+    $('vsArWinBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       startArWindowCapture();
     });
 
-    const arFileInput = document.getElementById('vsArFileInput');
-    document.getElementById('vsArImgBtn').addEventListener('click', (e) => {
+    const arFileInput = $('vsArFileInput');
+    $('vsArImgBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       if (!checkArObjectCap()) return;
       ignoreOutsideClickUntil = performance.now() + 4000;
@@ -1697,8 +2413,8 @@
       }
     });
 
-    const arTextInput = document.getElementById('vsArTextInput');
-    document.getElementById('vsArTextAddBtn').addEventListener('click', (e) => {
+    const arTextInput = $('vsArTextInput');
+    $('vsArTextAddBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       createArTextCard(arTextInput.value);
       arTextInput.value = '';
@@ -1766,7 +2482,6 @@
         }
       }
 
-      // Simplification Ramer-Douglas-Peucker avant stockage
       const simplified = simplifyRDP(rawPoints, state.laserMode ? 2.2 : 1.6);
       const normPts = simplified.map(p => ({ dx: (p.x - cx) / (size || 1), dy: (p.y - cy) / (size || 1) }));
       return createShapeObject('ink', cx, cy, size, normPts, state.laserMode);
@@ -1787,31 +2502,55 @@
       return true;
     }
 
-    const EDGE_MARGIN = 0.08;
+    const EDGE_MARGIN = 0.10;
+    const HAND_LOSS_GRACE_MS = 220;
+    let lastDomHandSeenMs = 0;
+    let lastAuxFistSeenMs = 0;
+
     function projectCoord(normVal, maxDim) {
       const scaled = (normVal - EDGE_MARGIN) / (1 - EDGE_MARGIN * 2);
       return Math.max(0, Math.min(maxDim, scaled * maxDim));
     }
 
     window.addEventListener('message', (e) => {
-      if (!e.data || !sandboxFrame || e.source !== sandboxFrame.contentWindow) return;
+      if (!e.data || !sandboxFrame || e.source !== sandboxFrame.contentWindow || e.origin !== SANDBOX_ORIGIN) return;
       const type = e.data.type;
+
+      if (type === 'VS_TIMER_READY') {
+        bgTimerReady = Boolean(e.data.ready);
+        return;
+      }
+      if (type === 'VS_TICK') {
+        bgTimerReady = true;
+        if (document.hidden && state.cameraActive && state.extEnabled) {
+          renderStep(performance.now(), true);
+        }
+        return;
+      }
       if (type === 'VS_SANDBOX_READY') {
+        clearMediaPipeTimeout();
+        if (e.data.timerReady !== undefined) {
+          bgTimerReady = Boolean(e.data.timerReady);
+        }
         setAiStatus('ready');
         sandboxBusy = false;
+        if (document.hidden && state.cameraActive && state.extEnabled && bgTimerReady) {
+          bgTimerWorker.postMessage('start');
+        }
         return;
       }
       if (type === 'VS_SANDBOX_ERROR') {
-        const errMsg = e.data.message || 'Échec du chargement de MediaPipe Hands.';
+        clearMediaPipeTimeout();
+        const errMsg = e.data.message || t().toastMpErrTitle;
         setAiStatus('error', errMsg);
         sandboxBusy = false;
         showToast({
           id: 'mp-error',
-          title: 'MediaPipe en échec',
-          message: `${errMsg} Vérifiez votre connexion ou réessayez d'initialiser le moteur IA.`,
+          title: t().toastMpErrTitle,
+          message: `${errMsg} ${t().toastMpErrSuffix}`,
           kind: 'error',
           duration: 10000,
-          actionLabel: '🔄 Réessayer',
+          actionLabel: t().retryBtn,
           onAction: retryMediaPipeSandbox
         });
         return;
@@ -1842,31 +2581,50 @@
           rawHands.push({ lm, wristScreenX, isFist, isAnatomicalLeft });
         });
 
-        if (rawHands.length === 1) {
-          const h0 = rawHands[0];
-          if (h0.isAnatomicalLeft && h0.isFist && h0.wristScreenX < w * 0.45) {
-            h0.role = 'L';
-          } else {
-            h0.role = 'R';
+        if (!state.leftHanded) {
+          if (rawHands.length === 1) {
+            const h0 = rawHands[0];
+            if (h0.isAnatomicalLeft && h0.isFist && h0.wristScreenX < w * 0.45) {
+              h0.role = 'L';
+            } else {
+              h0.role = 'R';
+            }
+          } else if (rawHands.length >= 2) {
+            if (rawHands[0].wristScreenX >= rawHands[1].wristScreenX) {
+              rawHands[0].role = 'R';
+              rawHands[1].role = 'L';
+            } else {
+              rawHands[0].role = 'L';
+              rawHands[1].role = 'R';
+            }
           }
-        } else if (rawHands.length >= 2) {
-          if (rawHands[0].wristScreenX >= rawHands[1].wristScreenX) {
-            rawHands[0].role = 'R';
-            rawHands[1].role = 'L';
-          } else {
-            rawHands[0].role = 'L';
-            rawHands[1].role = 'R';
+        } else {
+          if (rawHands.length === 1) {
+            const h0 = rawHands[0];
+            if (!h0.isAnatomicalLeft && h0.isFist && h0.wristScreenX > w * 0.55) {
+              h0.role = 'L';
+            } else {
+              h0.role = 'R';
+            }
+          } else if (rawHands.length >= 2) {
+            if (rawHands[0].wristScreenX <= rawHands[1].wristScreenX) {
+              rawHands[0].role = 'R';
+              rawHands[1].role = 'L';
+            } else {
+              rawHands[0].role = 'L';
+              rawHands[1].role = 'R';
+            }
           }
         }
       }
 
       const detected = [];
-      let sawRightHand = false;
+      let sawDominantHand = false;
 
       rawHands.forEach((item) => {
         const lm = item.lm;
         const role = item.role;
-        if (role === 'R') sawRightHand = true;
+        if (role === 'R') sawDominantHand = true;
 
         const rawPinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
         const rawPalmSize = Math.max(0.04, Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y));
@@ -1910,21 +2668,34 @@
         });
       });
 
-      if (!sawRightHand) {
+      const nowMs = performance.now();
+      if (sawDominantHand) {
+        lastDomHandSeenMs = nowMs;
+      } else if (nowMs - lastDomHandSeenMs > HAND_LOSS_GRACE_MS) {
         prevHandsPinching.R = false;
         smoothIndexCoords.R = { x: 0, y: 0 };
         smoothPinchCoords.R = { x: 0, y: 0 };
       }
 
       detected.sort((a, b) => (a.id === 'R' ? -1 : 1));
-      if (detected.length === 0) prevHandsPinching = { R: false, L: false };
+      if (detected.length === 0 && nowMs - lastDomHandSeenMs > HAND_LOSS_GRACE_MS) {
+        prevHandsPinching = { R: false, L: false };
+      }
 
-      const leftHandObj = detected.find(h => h.id === 'L');
-      const rightHandObj = detected.find(h => h.id === 'R');
-      const leftClutchNow = Boolean(leftHandObj && leftHandObj.isFist && !(rightHandObj && rightHandObj.isPinching));
+      const auxHandObj = detected.find(hd => hd.id === 'L');
+      const domHandObj = detected.find(hd => hd.id === 'R');
+      updatePinchMeter(domHandObj);
 
-      if (state.leftHandClutch !== leftClutchNow) {
-        state.leftHandClutch = leftClutchNow;
+      // Si on dessine déjà au poing, un faux pincement près du bord ne doit pas couper l'embrayage
+      const domPinchBlocksClutch = Boolean(!prevWriteActive && domHandObj && domHandObj.isPinching);
+      const rawFistNow = Boolean(auxHandObj && auxHandObj.isFist && !domPinchBlocksClutch);
+      if (rawFistNow) {
+        lastAuxFistSeenMs = nowMs;
+      }
+      const clutchNow = rawFistNow || (state.leftHandClutch && !domPinchBlocksClutch && (nowMs - lastAuxFistSeenMs <= HAND_LOSS_GRACE_MS));
+
+      if (state.leftHandClutch !== clutchNow) {
+        state.leftHandClutch = clutchNow;
         updateClutchBadge();
       }
 
@@ -1933,10 +2704,15 @@
     });
 
     function findShapeAt(x, y) {
+      if (state.hideAll) return null;
       for (let i = shapes.length - 1; i >= 0; i--) {
         const s = shapes[i];
-        if (!isArObject(s) && s.type !== 'ink') {
-          if (Math.hypot(x - s.x, y - s.y) <= Math.max(42, s.size * 0.6)) return s;
+        if (isArObject(s) || s.isLaser) continue;
+        if ((s.type === 'ink' || s.type === 'freehand') && s.points) {
+          const hitPt = s.points.some(pt => Math.hypot(x - (s.x + pt.dx * s.size), y - (s.y + pt.dy * s.size)) < 26);
+          if (hitPt) return s;
+        } else if (Math.hypot(x - s.x, y - s.y) <= Math.max(42, s.size * 0.6)) {
+          return s;
         }
       }
       for (let i = shapes.length - 1; i >= 0; i--) {
@@ -1958,22 +2734,25 @@
         if (isArObject(s)) continue;
         if ((s.type === 'ink' || s.type === 'freehand') && s.points) {
           if (s.points.some(pt => Math.hypot(x - (s.x + pt.dx * s.size), y - (s.y + pt.dy * s.size)) < 26)) {
-            shapes.splice(i, 1);
+            const [removed] = shapes.splice(i, 1);
+            redoStack.push(removed);
             return;
           }
         } else if (Math.hypot(x - s.x, y - s.y) <= Math.max(34, s.size * 0.55)) {
-          shapes.splice(i, 1);
+          const [removed] = shapes.splice(i, 1);
+          redoStack.push(removed);
           return;
         }
       }
     }
 
+    const TRASH_MARGIN = 46;
     function isInTrashEdge(x, y, w, h) {
-      return (x < 36 || x > w - 36 || y > h - 36);
+      return (x < TRASH_MARGIN || x > w - TRASH_MARGIN || y > h - TRASH_MARGIN);
     }
 
     function getAirMenuRects(w) {
-      const itemW = 88, itemH = 34, gap = 8;
+      const itemW = 76, itemH = 32, gap = 6;
       const totalW = AIR_MENU_ITEMS.length * itemW + (AIR_MENU_ITEMS.length - 1) * gap;
       const startX = (w - totalW) / 2;
       return AIR_MENU_ITEMS.map((item, idx) => ({
@@ -1984,7 +2763,7 @@
     function checkAirMenuHit(px, py, w) {
       if (!state.showAirMenu) return null;
       for (const r of getAirMenuRects(w)) {
-        if (px >= r.x - 6 && px <= r.x + r.w + 6 && py >= r.y - 6 && py <= r.y + r.h + 12) return r;
+        if (px >= r.x - 5 && px <= r.x + r.w + 5 && py >= r.y - 5 && py <= r.y + r.h + 10) return r;
       }
       return null;
     }
@@ -2023,8 +2802,8 @@
           }
         } else if (twoHandStretch.shape) {
           const s = twoHandStretch.shape;
-          const maxAllowed = isArObject(s) ? 920 : 500;
-          const minAllowed = isArObject(s) ? 140 : 30;
+          const maxAllowed = isArObject(s) ? 920 : 600;
+          const minAllowed = isArObject(s) ? 140 : 24;
           s.size = Math.min(maxAllowed, Math.max(minAllowed, twoHandStretch.initialSize * (dist / twoHandStretch.initialDist)));
           if (!isArObject(s)) {
             s.rotation = twoHandStretch.initialRot + (angle - twoHandStretch.initialAngle);
@@ -2041,12 +2820,15 @@
       }
 
       if (!rightHand) {
+        if (prevWriteActive && writeActive && (now - lastDomHandSeenMs <= HAND_LOSS_GRACE_MS)) {
+          return;
+        }
         finishActiveInteractions(w, h);
         prevWriteActive = false;
         return;
       }
 
-      // 2. GESTE DESSIN : EMBRAYAGE ACTIF (ESPACE OU POING GAUCHE) + INDEX DROIT
+      // 2. GESTE DESSIN : EMBRAYAGE ACTIF (ESPACE OU POING) + INDEX DOMINANT
       if (writeActive) {
         if (grabbedShape) {
           finishActiveInteractions(w, h);
@@ -2087,7 +2869,7 @@
         prevWriteActive = false;
       }
 
-      // 3. GESTE 1 MAIN : PINCEMENT MAIN DROITE -> DÉPLACER UN OBJET / FERMER AR / MENU FORMES
+      // 3. GESTE 1 MAIN : PINCEMENT MAIN DOMINANTE -> DÉPLACER OBJET / TRAIT PAINT / FERMER AR
       if (rightHand.justPinched) {
         if (state.eraser) {
           eraseAtPoint(rightHand.pinchX, rightHand.pinchY);
@@ -2136,7 +2918,7 @@
 
     function finishActiveInteractions(w, h) {
       if (grabbedShape) {
-        if (!isArObject(grabbedShape) && isInTrashEdge(grabbedShape.x, grabbedShape.y, w, h)) {
+        if (isInTrashEdge(grabbedShape.x, grabbedShape.y, w, h)) {
           removeShapeAndChildren(grabbedShape);
         }
         grabbedShape = null;
@@ -2192,8 +2974,8 @@
       if (hit) {
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.08 : 0.92;
-        const maxS = isArObject(hit) ? 920 : 500;
-        hit.size = Math.min(maxS, Math.max(80, hit.size * factor));
+        const maxS = isArObject(hit) ? 920 : 600;
+        hit.size = Math.min(maxS, Math.max(24, hit.size * factor));
         syncAttachedAnnotations();
       }
     }, { passive: false });
@@ -2232,7 +3014,6 @@
         if (s.videoEl.paused && s.videoEl.srcObject) {
           s.videoEl.play().catch(() => {});
         }
-        // Échantillonnage de la capture d'écran limité à 15 images/s max (~66.6 ms)
         if (s.frameCacheCanvas && s.frameCacheCtx && nowMs - (s.lastCaptureMs || 0) >= 66) {
           s.lastCaptureMs = nowMs;
           try {
@@ -2318,11 +3099,13 @@
         }
       }
 
+      const isSelected = (s === grabbedShape || s === twoHandStretch.shape);
+
       targetCtx.save();
       targetCtx.globalAlpha = alpha;
       targetCtx.translate(drawX, s.y);
       targetCtx.rotate(s.rotation);
-      targetCtx.strokeStyle = s.isLaser ? '#ff2a85' : s.color;
+      targetCtx.strokeStyle = s.isLaser ? '#ff2a85' : (isSelected && !cleanForMeet ? '#39ff14' : s.color);
       targetCtx.fillStyle = hexToRgba(s.color, 0.25);
       targetCtx.lineWidth = s.isLaser ? s.strokeWidth + 2.5 : s.strokeWidth;
       targetCtx.lineCap = 'round';
@@ -2338,7 +3121,20 @@
       if (s.type === 'circle') targetCtx.arc(0, 0, half, 0, Math.PI * 2);
       else if (s.type === 'rect') targetCtx.rect(-half, -half * 0.78, s.size, s.size * 0.78);
       else if (s.type === 'triangle') { targetCtx.moveTo(0, -half); targetCtx.lineTo(half, half * 0.85); targetCtx.lineTo(-half, half * 0.85); targetCtx.closePath(); }
-      else if (s.type === 'star') {
+      else if (s.type === 'diamond') {
+        targetCtx.moveTo(0, -half);
+        targetCtx.lineTo(half * 0.8, 0);
+        targetCtx.lineTo(0, half);
+        targetCtx.lineTo(-half * 0.8, 0);
+        targetCtx.closePath();
+      } else if (s.type === 'arrow') {
+        const head = Math.max(14, half * 0.45);
+        targetCtx.moveTo(-half, 0);
+        targetCtx.lineTo(half, 0);
+        targetCtx.moveTo(half - head, -head * 0.65);
+        targetCtx.lineTo(half, 0);
+        targetCtx.lineTo(half - head, head * 0.65);
+      } else if (s.type === 'star') {
         for (let i = 0; i < 10; i++) {
           const r = i % 2 === 0 ? half : half * 0.42, a = (i * Math.PI) / 5 - Math.PI / 2;
           if (i === 0) targetCtx.moveTo(Math.cos(a) * r, Math.sin(a) * r); else targetCtx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
@@ -2353,7 +3149,7 @@
       } else if (s.type === 'line') { targetCtx.moveTo(-half, 0); targetCtx.lineTo(half, 0); }
       else if ((s.type === 'freehand' || s.type === 'ink') && s.points) drawSmoothPath(targetCtx, s.points, s.size);
 
-      if (s.filled && s.type !== 'line' && s.type !== 'ink') targetCtx.fill();
+      if (s.filled && s.type !== 'line' && s.type !== 'arrow' && s.type !== 'ink') targetCtx.fill();
       targetCtx.stroke();
 
       if (s.isLaser && s.points) {
@@ -2370,7 +3166,6 @@
       targetCtx.restore();
     }
 
-    // Calque de cache hors-écran avec vérification de signature pour les formes statiques
     function isStaticCacheableShape(s) {
       return !isArObject(s) && !s.isLaser && s !== grabbedShape && s !== twoHandStretch.shape;
     }
@@ -2474,16 +3269,45 @@
       targetCtx.restore();
     }
 
-    function drawHUDElements(targetCtx, w, forStream = false) {
+    function drawTrashEdgeOverlay(targetCtx, w, h) {
+      if (!grabbedShape) return;
+      const nearEdge = isInTrashEdge(grabbedShape.x, grabbedShape.y, w, h);
+      targetCtx.save();
+      targetCtx.fillStyle = nearEdge ? 'rgba(255, 51, 75, 0.28)' : 'rgba(255, 51, 75, 0.1)';
+      targetCtx.fillRect(0, 0, TRASH_MARGIN, h);
+      targetCtx.fillRect(w - TRASH_MARGIN, 0, TRASH_MARGIN, h);
+      targetCtx.fillRect(TRASH_MARGIN, h - TRASH_MARGIN, w - TRASH_MARGIN * 2, TRASH_MARGIN);
+
+      targetCtx.strokeStyle = nearEdge ? '#ff334b' : 'rgba(255, 51, 75, 0.5)';
+      targetCtx.lineWidth = nearEdge ? 3 : 1.5;
+      targetCtx.strokeRect(2, 2, w - 4, h - 4);
+
+      if (nearEdge) {
+        targetCtx.fillStyle = 'rgba(255, 51, 75, 0.92)';
+        targetCtx.fillRect(w / 2 - 190, h - 38, 380, 26);
+        targetCtx.fillStyle = '#ffffff';
+        targetCtx.font = 'bold 11px monospace';
+        targetCtx.textAlign = 'center';
+        targetCtx.fillText(t().trashWarn, w / 2, h - 21);
+        targetCtx.textAlign = 'left';
+      }
+      targetCtx.restore();
+    }
+
+    function drawHUDElements(targetCtx, w, h, forStream = false) {
+      if (!forStream) {
+        drawTrashEdgeOverlay(targetCtx, w, h);
+      }
+
       const mapHudX = (x) => (forStream && state.mirror ? (w - x) : x);
-      const rightHand = handsData.find(h => h.id === 'R');
+      const rightHand = handsData.find(hd => hd.id === 'R');
       const cx = rightHand ? (rightHand.isPinching ? rightHand.pinchX : rightHand.smoothIndexX) : -999;
       const cy = rightHand ? (rightHand.isPinching ? rightHand.pinchY : rightHand.smoothIndexY) : -999;
 
       if (state.showAirMenu) {
         const rects = getAirMenuRects(w);
         rects.forEach(r => {
-          const hovered = (cx >= r.x - 6 && cx <= r.x + r.w + 6 && cy >= r.y - 6 && cy <= r.y + r.h + 12);
+          const hovered = (cx >= r.x - 5 && cx <= r.x + r.w + 5 && cy >= r.y - 5 && cy <= r.y + r.h + 10);
           const rx = forStream && state.mirror ? (w - r.x - r.w) : r.x;
           targetCtx.fillStyle = hovered ? hexToRgba(state.color, 0.35) : 'rgba(10, 12, 18, 0.82)';
           targetCtx.strokeStyle = hovered ? state.color : 'rgba(255, 255, 255, 0.32)';
@@ -2491,33 +3315,33 @@
           targetCtx.fillRect(rx, r.y, r.w, r.h);
           targetCtx.strokeRect(rx, r.y, r.w, r.h);
           targetCtx.fillStyle = '#fff';
-          targetCtx.font = 'bold 9.5px monospace';
+          targetCtx.font = 'bold 9px monospace';
           targetCtx.textAlign = 'center';
-          targetCtx.fillText(`+ ${r.label}`, rx + r.w / 2, r.y + 21);
+          targetCtx.fillText(`+ ${r.label}`, rx + r.w / 2, r.y + 20);
           targetCtx.textAlign = 'left';
         });
       }
 
       const clutchOn = isClutchEngaged();
-      handsData.forEach(h => {
-        if (h.id === 'L') {
-          const on = h.isFist || h.isPinching;
+      handsData.forEach(hd => {
+        if (hd.id === 'L') {
+          const on = hd.isFist || hd.isPinching;
           targetCtx.beginPath();
-          targetCtx.arc(mapHudX(h.landmarks[9].x), h.landmarks[9].y, 14, 0, Math.PI * 2);
+          targetCtx.arc(mapHudX(hd.landmarks[9].x), hd.landmarks[9].y, 14, 0, Math.PI * 2);
           targetCtx.strokeStyle = on ? '#39ff14' : '#ffffff';
           targetCtx.lineWidth = 2;
           targetCtx.stroke();
           return;
         }
-        if (h.id === 'R') {
-          const usePinchPos = h.isPinching && !clutchOn;
-          const rawPx = usePinchPos ? h.pinchX : h.smoothIndexX;
-          const py = usePinchPos ? h.pinchY : h.smoothIndexY;
+        if (hd.id === 'R') {
+          const usePinchPos = hd.isPinching && !clutchOn;
+          const rawPx = usePinchPos ? hd.pinchX : hd.smoothIndexX;
+          const py = usePinchPos ? hd.pinchY : hd.smoothIndexY;
           const px = mapHudX(rawPx);
           const col = state.eraser ? '#ff334b' : (state.laserMode ? '#ff2a85' : (usePinchPos ? '#39ff14' : state.color));
           targetCtx.beginPath();
-          targetCtx.arc(px, py, (clutchOn || h.isPinching) ? 7 : 9, 0, Math.PI * 2);
-          if (clutchOn || h.isPinching) {
+          targetCtx.arc(px, py, (clutchOn || hd.isPinching) ? 7 : 9, 0, Math.PI * 2);
+          if (clutchOn || hd.isPinching) {
             targetCtx.fillStyle = col;
             targetCtx.fill();
           } else {
@@ -2541,16 +3365,18 @@
       try {
         aiMiniCtx.drawImage(sourceVideo, 0, 0, 384, 216);
         const bitmap = await createImageBitmap(aiMiniCanvas);
-        sandboxFrame.contentWindow.postMessage({ type: 'VS_PROCESS_FRAME', bitmap }, '*', [bitmap]);
+        sandboxFrame.contentWindow.postMessage({ type: 'VS_PROCESS_FRAME', bitmap }, SANDBOX_ORIGIN, [bitmap]);
       } catch (e) {
         sandboxBusy = false;
       }
     }
 
     let streamCanvasNode = null;
+    let streamCanvasCtx = null;
     function streamCanvasEl() {
       if (!streamCanvasNode || !streamCanvasNode.isConnected) {
         streamCanvasNode = document.getElementById('vs-meet-stream-canvas');
+        streamCanvasCtx = streamCanvasNode ? streamCanvasNode.getContext('2d') : null;
       }
       return streamCanvasNode;
     }
@@ -2561,7 +3387,7 @@
     function renderStep(nowMs = performance.now(), fromBackgroundWorker = false) {
       if (!state.cameraActive && !panelOpen) return;
 
-      const minStepMs = state.ecoMode ? 48 : 32.5; // 20 fps en mode Éco, 30 fps max en mode normal
+      const minStepMs = state.ecoMode ? 48 : 32.5;
       const w = mainCanvas.width;
       const h = mainCanvas.height;
 
@@ -2578,7 +3404,7 @@
 
       syncAttachedAnnotations();
 
-      // 1. RENDU LOCAL (#vsMainCanvas : uniquement quand l'onglet est visible)
+      // 1. RENDU LOCAL (#vsMainCanvas)
       if (!document.hidden && (nowMs - lastLocalRenderMs >= (state.ecoMode ? 48 : 16))) {
         lastLocalRenderMs = nowMs;
 
@@ -2593,24 +3419,26 @@
           ctx.restore();
         }
 
-        shapes.forEach(s => {
-          if (isArObject(s)) drawShape(ctx, s, false, nowMs, false, w);
-        });
-        renderNonArShapesWithCache(ctx, false, nowMs, false, w, h);
-        drawActiveStroke(ctx, w, false);
-        drawHUDElements(ctx, w, false);
+        if (!state.hideAll) {
+          shapes.forEach(s => {
+            if (isArObject(s)) drawShape(ctx, s, false, nowMs, false, w);
+          });
+          renderNonArShapesWithCache(ctx, false, nowMs, false, w, h);
+          drawActiveStroke(ctx, w, false);
+        }
+
+        drawHUDElements(ctx, w, h, false);
 
         if (!panelOpen && state.cameraActive && state.extEnabled) {
-          positionMiniPreview();
           miniPreviewCtx.drawImage(mainCanvas, 0, 0, 224, 126);
         }
       }
 
-      // 2. RENDU DU FLUX SORTANT MEET (#vs-meet-stream-canvas : limité à 30 images/s max, ou 20 images/s en mode Éco)
+      // 2. RENDU DU FLUX SORTANT MEET (#vs-meet-stream-canvas)
       const meetStreamCanvas = streamCanvasEl();
-      if (meetStreamCanvas && state.cameraActive && state.extEnabled && (nowMs - lastStreamRenderMs >= minStepMs)) {
+      if (meetStreamCanvas && streamCanvasCtx && state.cameraActive && state.extEnabled && (nowMs - lastStreamRenderMs >= minStepMs)) {
         lastStreamRenderMs = nowMs;
-        const mCtx = meetStreamCanvas.getContext('2d');
+        const mCtx = streamCanvasCtx;
         const mw = meetStreamCanvas.width;
         const mh = meetStreamCanvas.height;
 
@@ -2624,15 +3452,17 @@
           mCtx.restore();
         }
 
-        const cleanForMeet = !state.showHudOnMeet;
-        shapes.forEach(s => {
-          if (isArObject(s)) drawShape(mCtx, s, cleanForMeet, nowMs, true, mw);
-        });
-        renderNonArShapesWithCache(mCtx, cleanForMeet, nowMs, true, mw, mh);
-        drawActiveStroke(mCtx, mw, true);
+        if (!state.hideAll) {
+          const cleanForMeet = !state.showHudOnMeet;
+          shapes.forEach(s => {
+            if (isArObject(s)) drawShape(mCtx, s, cleanForMeet, nowMs, true, mw);
+          });
+          renderNonArShapesWithCache(mCtx, cleanForMeet, nowMs, true, mw, mh);
+          drawActiveStroke(mCtx, mw, true);
+        }
 
         if (state.showHudOnMeet) {
-          drawHUDElements(mCtx, mw, true);
+          drawHUDElements(mCtx, mw, mh, true);
         }
       }
     }
@@ -2644,56 +3474,38 @@
       }
     }
 
-    // WEB WORKER DE MAINTIEN DU FLUX QUAND L'ONGLET MEET EST EN ARRIÈRE-PLAN (document.hidden)
-    let bgTimerWorker = null;
-    try {
-      const workerCode = `
-        let intervalId = null;
-        self.onmessage = function(e) {
-          if (e.data === 'start') {
-            if (intervalId) clearInterval(intervalId);
-            intervalId = setInterval(function() { self.postMessage('tick'); }, 33);
-          } else if (e.data === 'stop') {
-            if (intervalId) { clearInterval(intervalId); intervalId = null; }
-          }
-        };
-      `;
-      const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(workerBlob);
-      bgTimerWorker = new Worker(workerUrl);
-      URL.revokeObjectURL(workerUrl);
-
-      bgTimerWorker.onmessage = () => {
-        if (document.hidden && state.cameraActive && state.extEnabled) {
-          renderStep(performance.now(), true);
-        }
-      };
-    } catch (e) {}
-
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         releaseSpace();
-        if (bgTimerWorker && state.cameraActive && state.extEnabled) {
-          bgTimerWorker.postMessage('start');
-        }
         if (state.cameraActive && state.extEnabled) {
-          showToast({
-            id: 'bg-tab-warn',
-            title: 'Onglet Meet en arrière-plan',
-            message: 'Minuteur Web Worker actif pour éviter le gel de votre caméra virtuelle (le suivi des mains MediaPipe reprendra à pleine vitesse au retour sur l’onglet).',
-            kind: 'warn',
-            duration: 6000
-          });
+          if (bgTimerReady) {
+            bgTimerWorker.postMessage('start');
+            showToast({
+              id: 'bg-tab-warn',
+              title: t().toastBgTabTitle,
+              message: t().toastBgTabActiveMsg,
+              kind: 'warn',
+              duration: 5000
+            });
+          } else {
+            showToast({
+              id: 'bg-tab-warn',
+              title: t().toastBgTabTitle,
+              message: t().toastBgTabWarnMsg,
+              kind: 'warn',
+              duration: 6000
+            });
+          }
         }
       } else {
-        if (bgTimerWorker) {
-          bgTimerWorker.postMessage('stop');
-        }
+        bgTimerWorker.postMessage('stop');
       }
     });
 
-    // 8. CAMÉRA, SYNCHRONISATION CHROME.STORAGE & ÉVÉNEMENTS BOUTONS
-    const cameraSelect = document.getElementById('vsCameraSelect');
+    // ==========================================================================
+    // 8. CAMÉRA (N1, N2, N3, N5), RACCOURCIS CLAVIER, TUTORIEL & ÉVÉNEMENTS
+    // ==========================================================================
+    const cameraSelect = $('vsCameraSelect');
 
     async function updateCameraList() {
       try {
@@ -2703,7 +3515,7 @@
         videoDevices.forEach((dev, i) => {
           const opt = document.createElement('option');
           opt.value = dev.deviceId;
-          opt.textContent = dev.label || `Caméra ${i + 1}`;
+          opt.textContent = dev.label || `${t().camLabelPrefix} ${i + 1}`;
           if (dev.deviceId === state.selectedDeviceId) opt.selected = true;
           cameraSelect.appendChild(opt);
         });
@@ -2714,30 +3526,23 @@
       state.cameraActive = false;
       state.spacePressed = false;
       state.leftHandClutch = false;
-      if (bgTimerWorker) bgTimerWorker.postMessage('stop');
+      bgTimerWorker.postMessage('stop');
       syncSpaceGuard();
       document.documentElement.dataset.vsCamRunning = 'false';
       bubble.classList.remove('cam-on');
-      const camBtn = document.getElementById('vsCamBtn');
+      const camBtn = $('vsCamBtn');
       if (camBtn) {
         camBtn.classList.remove('active');
-        camBtn.textContent = '📷 START CAM';
+        setBtn(camBtn, 'video', t().startCam);
       }
       positionMiniPreview();
       updateClutchBadge();
-
-      const meetStreamCanvas = streamCanvasEl();
-      if (meetStreamCanvas) {
-        const mCtx = meetStreamCanvas.getContext('2d');
-        mCtx.fillStyle = '#06070a';
-        mCtx.fillRect(0, 0, meetStreamCanvas.width, meetStreamCanvas.height);
-      }
     }
 
     function stopCamera() {
       if (sourceVideo.srcObject) {
         try {
-          sourceVideo.srcObject.getTracks().forEach(t => t.stop());
+          sourceVideo.srcObject.getTracks().forEach(tr => tr.stop());
         } catch (e) {}
         sourceVideo.srcObject = null;
       }
@@ -2748,24 +3553,52 @@
 
     async function startCamera(deviceId = '') {
       if (!state.extEnabled) return;
-      if (startingCameraPromise) return startingCameraPromise;
+      if (startingCameraPromise) {
+        await startingCameraPromise;
+      }
 
       startingCameraPromise = (async () => {
         try {
           if (sourceVideo.srcObject) {
-            sourceVideo.srcObject.getTracks().forEach(t => t.stop());
+            sourceVideo.srcObject.getTracks().forEach(tr => tr.stop());
           }
           const targetId = (deviceId && deviceId !== 'vision-studio-virtual-cam') ? deviceId : '';
-          const constraints = {
-            video: targetId
-              ? { deviceId: { exact: targetId }, width: { ideal: 960 }, height: { ideal: 540 } }
-              : { width: { ideal: 960 }, height: { ideal: 540 } }
-          };
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          let stream = null;
+
+          // N2 : Repli automatique si la caméra mémorisée est introuvable (OverconstrainedError / NotFoundError)
+          if (targetId) {
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: { exact: targetId }, width: { ideal: 960 }, height: { ideal: 540 } }
+              });
+            } catch (err) {
+              if (err && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) {
+                state.selectedDeviceId = '';
+                scheduleSaveSettings();
+                showToast({
+                  id: 'cam-fallback',
+                  title: t().toastCamFallbackTitle,
+                  message: t().toastCamFallbackMsg,
+                  kind: 'warn',
+                  duration: 5000
+                });
+                stream = await navigator.mediaDevices.getUserMedia({
+                  video: { width: { ideal: 960 }, height: { ideal: 540 } }
+                });
+              } else {
+                throw err;
+              }
+            }
+          } else {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { width: { ideal: 960 }, height: { ideal: 540 } }
+            });
+          }
+
           sourceVideo.srcObject = stream;
           await sourceVideo.play();
           state.cameraActive = true;
-          if (document.hidden && bgTimerWorker) {
+          if (document.hidden && bgTimerReady) {
             bgTimerWorker.postMessage('start');
           }
           syncSpaceGuard();
@@ -2776,28 +3609,35 @@
           if (track) {
             track.addEventListener('ended', onCameraEnded, { once: true });
             const settings = track.getSettings ? track.getSettings() : {};
-            if (settings.deviceId) {
+            if (settings.deviceId && settings.deviceId !== 'vision-studio-virtual-cam') {
               state.selectedDeviceId = settings.deviceId;
+              scheduleSaveSettings();
+            } else if (targetId) {
+              state.selectedDeviceId = targetId;
               scheduleSaveSettings();
             }
           }
           await updateCameraList();
-          const camBtn = document.getElementById('vsCamBtn');
+          const camBtn = $('vsCamBtn');
           if (camBtn) {
             camBtn.classList.add('active');
-            camBtn.textContent = '📷 CAM ON';
+            setBtn(camBtn, 'video', t().camOn);
             camBtn.blur();
           }
           positionMiniPreview();
         } catch (err) {
           onCameraEnded();
+          const isPermDenied = err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError');
+          const msg = isPermDenied
+            ? t().toastCamPermMsg
+            : `${t().toastCamErrPrefix} (${err && err.name ? err.name : 'Error'}: ${err && err.message ? err.message : 'unavailable'}).`;
           showToast({
             id: 'cam-error',
-            title: 'Accès caméra impossible',
-            message: `La caméra n'a pas pu démarrer (${err && err.name ? err.name : 'Erreur'}). Marche à suivre : cliquez sur l'icône 🔒 ou 📷 à gauche de l'URL meet.google.com → Autoriser la caméra, puis cliquez sur Réessayer.`,
+            title: isPermDenied ? t().toastCamPermTitle : t().toastCamErrTitle,
+            message: msg,
             kind: 'error',
             duration: 10000,
-            actionLabel: '🔄 Réessayer',
+            actionLabel: t().retryBtn,
             onAction: () => startCamera(state.selectedDeviceId)
           });
         } finally {
@@ -2809,10 +3649,10 @@
     }
 
     function updateExtActiveUI() {
-      const extBtn = document.getElementById('vsExtActiveBtn');
+      const extBtn = $('vsExtActiveBtn');
       if (!extBtn) return;
       extBtn.classList.toggle('active', state.extEnabled);
-      extBtn.textContent = state.extEnabled ? '🟢 Ext: ON' : '⚫ Ext: OFF';
+      setBtn(extBtn, 'power', state.extEnabled ? t().extOn : t().extOff);
     }
 
     function setExtensionEnabled(enabled, options = {}) {
@@ -2842,21 +3682,22 @@
 
       if (!state.extEnabled) {
         stopCamera();
+        const isStopBtn = options.reason === 'stopCam';
         showToast({
           id: 'ext-state',
-          title: 'Extension désactivée (Passthrough)',
-          message: 'Meet utilise désormais votre vraie caméra directement. Activez ou coupez/relancez la caméra dans Meet si besoin.',
+          title: isStopBtn ? t().toastStopCamTitle : t().toastExtOffTitle,
+          message: t().toastExtOffMsg,
           kind: 'warn',
-          duration: 4500
+          duration: 5500
         });
       } else {
         startCamera(state.selectedDeviceId);
         showToast({
           id: 'ext-state',
-          title: 'Extension activée',
-          message: 'Caméra virtuelle Vision Studio active.',
+          title: t().toastExtOnTitle,
+          message: t().toastExtOnMsg,
           kind: 'info',
-          duration: 3500
+          duration: 5000
         });
       }
     }
@@ -2866,6 +3707,13 @@
         if (area !== 'local') return;
         if (changes.extEnabled !== undefined) {
           setExtensionEnabled(changes.extEnabled.newValue !== false, { fromExternal: true });
+        }
+        if (changes.lang !== undefined) {
+          const nextLang = changes.lang.newValue === 'en' ? 'en' : 'fr';
+          if (state.lang !== nextLang) {
+            state.lang = nextLang;
+            applyLanguageUI();
+          }
         }
       });
     }
@@ -2879,16 +3727,90 @@
       });
     }
 
+    // Gestion des raccourcis clavier configurables
+    let listeningShortcutKey = null;
+
+    guard.onShortcut = (e) => {
+      if (listeningShortcutKey) {
+        swallow(e);
+        state.shortcuts[listeningShortcutKey] = e.code;
+        listeningShortcutKey = null;
+        root.querySelectorAll('.vs-sc-key').forEach(b => b.classList.remove('listening'));
+        renderShortcutsButtons();
+        scheduleSaveSettings();
+        return;
+      }
+      if (!panelOpen || !state.extEnabled) return;
+      const code = e.code;
+      if (code === state.shortcuts.drawMode) { swallow(e); setDrawMode(!state.drawMode); }
+      else if (code === state.shortcuts.laser) { swallow(e); toggleLaserMode(); }
+      else if (code === state.shortcuts.eraser) {
+        swallow(e);
+        state.eraser = !state.eraser;
+        if (state.eraser && state.laserMode) toggleLaserMode();
+        $('vsEraserBtn').classList.toggle('active', state.eraser);
+      }
+      else if (code === state.shortcuts.hideAll) { swallow(e); toggleHideAll(); }
+      else if (code === state.shortcuts.undo) { swallow(e); performUndo(); }
+      else if (code === state.shortcuts.redo) { swallow(e); performRedo(); }
+    };
+
+    root.querySelectorAll('.vs-sc-key').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.currentTarget.blur();
+        root.querySelectorAll('.vs-sc-key').forEach(b => b.classList.remove('listening'));
+        listeningShortcutKey = btn.dataset.sc;
+        btn.classList.add('listening');
+        btn.textContent = '...';
+      });
+    });
+
+    $('vsShortcutsBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      tutorialModal.classList.remove('open');
+      shortcutsModal.classList.toggle('open');
+    });
+
+    $('vsShortcutsCloseBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      listeningShortcutKey = null;
+      root.querySelectorAll('.vs-sc-key').forEach(b => b.classList.remove('listening'));
+      renderShortcutsButtons();
+      shortcutsModal.classList.remove('open');
+    });
+
+    $('vsTutorialBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      shortcutsModal.classList.remove('open');
+      tutorialModal.classList.toggle('open');
+    });
+
+    $('vsTutorialCloseBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      tutorialModal.classList.remove('open');
+      if (!state.tutorialSeen) {
+        state.tutorialSeen = true;
+        scheduleSaveSettings();
+      }
+    });
+
+    $('vsLangBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      state.lang = state.lang === 'fr' ? 'en' : 'fr';
+      applyLanguageUI();
+      scheduleSaveSettings();
+    });
+
     updateExtActiveUI();
     syncSpaceGuard();
     updateClutchBadge();
 
-    document.getElementById('vsExtActiveBtn').addEventListener('click', (e) => {
+    $('vsExtActiveBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       setExtensionEnabled(!state.extEnabled);
     });
 
-    document.getElementById('vsCamBtn').addEventListener('click', (e) => {
+    $('vsCamBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       if (!state.extEnabled) {
         setExtensionEnabled(true);
@@ -2897,23 +3819,40 @@
       }
     });
 
-    document.getElementById('vsStopCamBtn').addEventListener('click', (e) => {
+    // N5 : STOP CAM repasse proprement les participants sur la vraie caméra (comme Extension OFF)
+    $('vsStopCamBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
-      stopCamera();
+      if (state.extEnabled) {
+        setExtensionEnabled(false, { reason: 'stopCam' });
+      } else {
+        stopCamera();
+      }
     });
 
-    document.getElementById('vsDrawModeBtn').addEventListener('click', (e) => {
+    $('vsDrawModeBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       setDrawMode(!state.drawMode);
     });
 
+    window.addEventListener('vs-audio-error', () => {
+      showToast({
+        id: 'audio-error',
+        title: t().toastAudioErrTitle,
+        message: t().toastAudioErrMsg,
+        kind: 'warn',
+        duration: 7000
+      });
+    });
+
+    // N1 : Si Meet impose un autre identifiant de caméra, redémarre immédiatement startCamera(reqId)
     window.addEventListener('vs-meet-request-cam', (e) => {
       const reqId = (e.detail && e.detail.deviceId) || '';
-      if (reqId && !state.selectedDeviceId) {
+      if (!state.extEnabled) return;
+      if (reqId && reqId !== state.selectedDeviceId) {
         state.selectedDeviceId = reqId;
         scheduleSaveSettings();
-      }
-      if (state.extEnabled && !state.cameraActive) {
+        startCamera(reqId);
+      } else if (!state.cameraActive) {
         startCamera(state.selectedDeviceId);
       }
     });
@@ -2925,81 +3864,90 @@
       if (state.cameraActive) startCamera(e.target.value);
     });
 
-    document.getElementById('vsLaserQuickBtn').addEventListener('click', (e) => {
+    $('vsLaserQuickBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       toggleLaserMode();
     });
 
-    document.getElementById('vsLaserStyleBtn').addEventListener('click', (e) => {
+    $('vsLaserStyleBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
       toggleLaserMode();
     });
 
-    document.getElementById('vsAirMenuToggleBtn').addEventListener('click', (e) => {
+    $('vsAirMenuToggleBtn').addEventListener('click', (e) => {
       state.showAirMenu = !state.showAirMenu;
       e.currentTarget.classList.toggle('active', state.showAirMenu);
-      e.currentTarget.textContent = state.showAirMenu ? '📐 Formes: ON' : '📐 Formes: OFF';
+      setBtn(e.currentTarget, 'shapes', state.showAirMenu ? t().shapesOn : t().shapesOff);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsArOpacitySlider').addEventListener('input', (e) => {
+    $('vsArOpacitySlider').addEventListener('input', (e) => {
       state.arOpacity = parseFloat(e.target.value);
       scheduleSaveSettings();
     });
 
-    document.getElementById('vsHudMeetBtn').addEventListener('click', (e) => {
+    $('vsHudMeetBtn').addEventListener('click', (e) => {
       state.showHudOnMeet = !state.showHudOnMeet;
       e.currentTarget.classList.toggle('active', state.showHudOnMeet);
-      e.currentTarget.textContent = state.showHudOnMeet ? '👁️ HUD Meet: ON' : '👁️ HUD Meet: OFF';
+      setBtn(e.currentTarget, state.showHudOnMeet ? 'eye' : 'eyeOff', state.showHudOnMeet ? t().hudMeetOn : t().hudMeetOff);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsSmartBtn').addEventListener('click', (e) => {
+    $('vsSmartBtn').addEventListener('click', (e) => {
       state.smartShape = !state.smartShape;
       e.currentTarget.classList.toggle('active', state.smartShape);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsFillBtn').addEventListener('click', (e) => {
+    $('vsFillBtn').addEventListener('click', (e) => {
       state.filled = !state.filled;
       e.currentTarget.classList.toggle('active', state.filled);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsMirrorBtn').addEventListener('click', (e) => {
+    $('vsMirrorBtn').addEventListener('click', (e) => {
       state.mirror = !state.mirror;
       e.currentTarget.classList.toggle('active', state.mirror);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsBwBtn').addEventListener('click', (e) => {
+    $('vsLeftHandedBtn').addEventListener('click', (e) => {
+      state.leftHanded = !state.leftHanded;
+      e.currentTarget.classList.toggle('active', state.leftHanded);
+      setBtn(e.currentTarget, 'hand', state.leftHanded ? t().leftHandedOn : t().leftHandedOff);
+      updateClutchBadge();
+      scheduleSaveSettings();
+      e.currentTarget.blur();
+    });
+
+    $('vsBwBtn').addEventListener('click', (e) => {
       state.bwFilter = !state.bwFilter;
       e.currentTarget.classList.toggle('active', state.bwFilter);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsEcoBtn').addEventListener('click', (e) => {
+    $('vsEcoBtn').addEventListener('click', (e) => {
       state.ecoMode = !state.ecoMode;
       e.currentTarget.classList.toggle('active', state.ecoMode);
-      e.currentTarget.textContent = state.ecoMode ? '🍃 Éco: ON' : '🍃 Éco: OFF';
+      setBtn(e.currentTarget, 'leaf', state.ecoMode ? t().ecoOn : t().ecoOff);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsArFlipBtn').addEventListener('click', (e) => {
+    $('vsArFlipBtn').addEventListener('click', (e) => {
       state.arFlip = !state.arFlip;
       e.currentTarget.classList.toggle('active', state.arFlip);
       scheduleSaveSettings();
       e.currentTarget.blur();
     });
 
-    document.getElementById('vsEraserBtn').addEventListener('click', (e) => {
+    $('vsEraserBtn').addEventListener('click', (e) => {
       state.eraser = !state.eraser;
       if (state.eraser && state.laserMode) toggleLaserMode();
       e.currentTarget.classList.toggle('active', state.eraser);
@@ -3012,38 +3960,89 @@
       });
     });
 
-    document.getElementById('vsColorPicker').addEventListener('input', (e) => setThemeColor(e.target.value));
-    document.getElementById('vsPinchSlider').addEventListener('input', (e) => {
+    $('vsColorPicker').addEventListener('input', (e) => setThemeColor(e.target.value));
+    $('vsPinchSlider').addEventListener('input', (e) => {
       state.pinchThreshold = parseFloat(e.target.value);
+      updatePinchThreshMarker();
       scheduleSaveSettings();
     });
-    document.getElementById('vsStrokeSlider').addEventListener('input', (e) => {
+    $('vsStrokeSlider').addEventListener('input', (e) => {
       state.strokeWidth = parseFloat(e.target.value);
       scheduleSaveSettings();
     });
 
-    document.getElementById('vsUndoBtn').addEventListener('click', (e) => {
-      const removed = shapes.pop();
-      if (removed) removeShapeAndChildren(removed);
+    $('vsHideAllBtn').addEventListener('click', (e) => {
       e.currentTarget.blur();
+      toggleHideAll();
     });
 
-    document.getElementById('vsClearBtn').addEventListener('click', (e) => {
-      shapes.forEach(cleanupShapeResources);
+    $('vsUndoBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      performUndo();
+    });
+
+    $('vsRedoBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      performRedo();
+    });
+
+    let lastClearedSnapshot = null;
+    let lastClearedTimer = null;
+
+    function disposeClearedSnapshot() {
+      if (lastClearedTimer) {
+        clearTimeout(lastClearedTimer);
+        lastClearedTimer = null;
+      }
+      if (lastClearedSnapshot) {
+        lastClearedSnapshot.forEach((item) => {
+          if (!shapes.includes(item)) cleanupShapeResources(item);
+        });
+        lastClearedSnapshot = null;
+      }
+    }
+
+    $('vsClearBtn').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      if (shapes.length === 0) return;
+      disposeClearedSnapshot();
+      lastClearedSnapshot = shapes.slice();
       shapes = [];
+      clearRedoStack();
       localStaticSignature = '';
       streamStaticSignature = '';
-      e.currentTarget.blur();
+
+      lastClearedTimer = setTimeout(disposeClearedSnapshot, 6500);
+      showToast({
+        id: 'clear-undo',
+        title: t().toastClearTitle,
+        message: t().toastClearMsg,
+        kind: 'info',
+        duration: 6000,
+        actionLabel: t().undoAction,
+        onAction: () => {
+          if (!lastClearedSnapshot) return;
+          shapes = lastClearedSnapshot.concat(shapes);
+          lastClearedSnapshot = null;
+          if (lastClearedTimer) {
+            clearTimeout(lastClearedTimer);
+            lastClearedTimer = null;
+          }
+          localStaticSignature = '';
+          streamStaticSignature = '';
+        }
+      });
     });
 
     updateCameraList();
     setAiStatus('loading');
+    startMediaPipeTimeout();
     requestAnimationFrame(animate);
 
     const meetAsked = pendingMeetCamRequest || (document.documentElement && document.documentElement.dataset.vsMeetRequestedVideo === 'true');
     const initDevId = pendingRequestedDeviceId || (document.documentElement && document.documentElement.dataset.vsRequestedDeviceId) || '';
     if (meetAsked && state.extEnabled) {
-      if (initDevId && !state.selectedDeviceId) state.selectedDeviceId = initDevId;
+      if (initDevId) state.selectedDeviceId = initDevId;
       startCamera(state.selectedDeviceId);
     }
   }

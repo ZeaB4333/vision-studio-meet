@@ -1,5 +1,3 @@
-#### Fichier 3 : `PRIVACY.md` (Politique de confidentialité prête à publier — 1 page)
-```markdown
 # Politique de Confidentialité — Vision Studio for Google Meet™
 *Dernière mise à jour : Octobre 2026*
 
